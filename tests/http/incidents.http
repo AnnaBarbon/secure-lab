@@ -25,6 +25,8 @@ Accept: application/json
 GET {{host}}/api/incidents?status=Unknown
 Accept: application/json
 
-### Lab 1 extension point: expected 501 before student implementation
+### Get incident severity summary (implemented)
+# Очікується 200 OK із масивом елементів { severity, count }
+# Політика: лише наявні групи (3 елементи на seed), порядок: Count DESC, Severity ASC
 GET {{host}}/api/incidents/severity-summary
 Accept: application/json
