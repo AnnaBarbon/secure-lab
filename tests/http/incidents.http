@@ -42,3 +42,7 @@ Accept: application/json
 ### Get incident severity summary with invalid status: expected 400 Validation Problem Details
 GET {{host}}/api/incidents/severity-summary?status=Unknown
 Accept: application/json
+
+### Check non-existent API route
+GET http://localhost:5080/api/does-not-exist
+Accept: application/json

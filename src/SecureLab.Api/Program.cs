@@ -60,6 +60,11 @@ app.MapGet("/health", async (SecureLabDbContext dbContext, CancellationToken can
     .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
 app.MapIncidentEndpoints();
+app.Map("/api/{*path}", () => Results.Problem(
+    title: "API route not found",
+    detail: "The requested API endpoint does not exist.",
+    statusCode: StatusCodes.Status404NotFound
+));
 app.MapFallbackToFile("index.html");
 
 app.Run();
