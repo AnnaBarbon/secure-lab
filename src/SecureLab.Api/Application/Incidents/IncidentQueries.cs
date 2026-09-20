@@ -60,29 +60,39 @@ public sealed class IncidentQueries(SecureLabDbContext dbContext, ILogger<Incide
     }
 
     public async Task<IReadOnlyList<IncidentSeveritySummaryResponse>> GetSeveritySummaryAsync(
-    CancellationToken cancellationToken = default)
+        string? statusFilter,
+        string traceId,
+        CancellationToken cancellationToken = default)
     {
-        var rawGroups = await dbContext.Incidents
-            .AsNoTracking()
-            .GroupBy(incident => incident.Severity)
-            .Select(group => new
+        var query = dbContext.Incidents.AsNoTracking();
+
+        if (!string.IsNullOrWhiteSpace(statusFilter) &&
+            Enum.TryParse<IncidentStatus>(statusFilter, ignoreCase: true, out var parsedStatus))
+        {
+            query = query.Where(i => i.Status == parsedStatus);
+        }
+
+        var rawGroups = await query
+            .GroupBy(i => i.Severity)
+            .Select(g => new
             {
-                Severity = group.Key,
-                Count = group.Count()
+                Severity = g.Key,
+                Count = g.Count()
             })
-            .OrderByDescending(item => item.Count)
             .ToListAsync(cancellationToken);
 
         var summary = rawGroups
             .Select(item => new IncidentSeveritySummaryResponse(
                 item.Severity.ToString(),
                 item.Count))
-            .OrderByDescending(item => item.Count)
-            .ThenBy(item => item.Severity)
+            .OrderByDescending(s => s.Count)
+            .ThenBy(s => s.Severity)
             .ToList();
 
         logger.LogInformation(
-            "Formed severity summary. Total groups: {GroupCount}",
+            "Formed severity summary. TraceId: {TraceId}, StatusFilter: {StatusFilter}, Total groups: {GroupCount}",
+            traceId,
+            statusFilter ?? "All",
             summary.Count);
 
         return summary;

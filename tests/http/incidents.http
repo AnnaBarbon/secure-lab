@@ -34,3 +34,11 @@ Accept: application/json
 # Політика: лише наявні групи (3 елементи на seed), порядок: Count DESC, Severity ASC
 GET {{host}}/api/incidents/severity-summary
 Accept: application/json
+
+### Get incident severity summary with valid filter (Triaged, 200 OK)
+GET {{host}}/api/incidents/severity-summary?status=Triaged
+Accept: application/json
+
+### Get incident severity summary with invalid status: expected 400 Validation Problem Details
+GET {{host}}/api/incidents/severity-summary?status=Unknown
+Accept: application/json
