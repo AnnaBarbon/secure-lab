@@ -13,6 +13,10 @@ Accept: application/json
 GET {{host}}/api/incidents?status=Triaged
 Accept: application/json
 
+### Filtered list: expected 200 OK with empty array []
+GET {{host}}/api/incidents?status=Resolved
+Accept: application/json
+
 ### Existing details
 GET {{host}}/api/incidents/{{aliceIncidentId}}
 Accept: application/json
