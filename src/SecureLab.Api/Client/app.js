@@ -109,3 +109,40 @@ filterForm.addEventListener("submit", (event) => {
 });
 
 loadIncidents();
+
+async function loadSeveritySummary() {
+  const summaryBtn = document.getElementById("load-summary-btn");
+  const summaryStatus = document.getElementById("summary-status");
+  const summaryList = document.getElementById("summary-list");
+
+  if (!summaryBtn || !summaryStatus || !summaryList) {
+    return;
+  }
+
+  summaryList.replaceChildren();
+  summaryStatus.textContent = "Завантаження…";
+  summaryBtn.disabled = true;
+
+  try {
+    const items = await apiFetch("/api/incidents/severity-summary");
+
+    if (!Array.isArray(items) || items.length === 0) {
+      summaryStatus.textContent = "Даних немає";
+      return;
+    }
+
+    summaryStatus.textContent = "";
+
+    for (const summary of items) {
+      const item = document.createElement("li");
+      item.textContent = `${summary.severity}: ${summary.count}`;
+      summaryList.append(item);
+    }
+  } catch (error) {
+    summaryStatus.textContent = "Не вдалося завантажити підсумок інцидентів.";
+  } finally {
+    summaryBtn.disabled = false;
+  }
+}
+
+document.getElementById("load-summary-btn")?.addEventListener("click", loadSeveritySummary);
