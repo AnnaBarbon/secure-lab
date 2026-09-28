@@ -1,0 +1,107 @@
+@host = http://localhost:5080
+
+### severity "7" (Очікується: 400 Bad Request)
+POST {{host}}/api/incidents
+Content-Type: application/json
+
+{
+  "title": "Unauthorized access attempt",
+  "description": "Виявлено спробу несанкціонованого доступу до бази даних.",
+  "severity": "7",
+  "occurredAtUtc": "2026-09-27T12:00:00Z"
+}
+
+### відсутній occurredAtUtc (Очікується: 400 Bad Request)
+POST {{host}}/api/incidents
+Content-Type: application/json
+
+{
+  "title": "Missing timestamp incident",
+  "description": "Тестовий опис інциденту без зазначення обов'язкової часової мітки.",
+  "severity": "Low"
+}
+
+### дата з майбутнього (> 5 хвилин) (Очікується: 400 Bad Request)
+POST {{host}}/api/incidents
+Content-Type: application/json
+
+{
+  "title": "Future timestamp incident",
+  "description": "Спроба зареєструвати подію із датою в майбутньому.",
+  "severity": "Low",
+  "occurredAtUtc": "2028-10-30T00:00:00Z"
+}
+
+### перевірка нормалізації зміщення часового поясу (Offset +03:00 -> UTC)
+POST {{host}}/api/incidents
+Content-Type: application/json
+
+{
+  "title": "Timezone offset normalization test",
+  "description": "Тестування збереження мітки часу зі зміщенням часового поясу +03:00.",
+  "severity": "Low",
+  "occurredAtUtc": "2026-09-01T13:00:00+03:00"
+}
+
+### занадто стара дата (> 365 днів) (Очікується: 400 Bad Request)
+POST {{host}}/api/incidents
+Content-Type: application/json
+
+{
+  "title": "Incident from the distant past",
+  "description": "Тестовий опис для перевірки обмеження максимального віку інциденту.",
+  "severity": "Low",
+  "occurredAtUtc": "2020-01-01T00:00:00Z"
+}
+
+### High + опис 39 символів (Очікується: 400 Bad Request)
+POST {{host}}/api/incidents
+Content-Type: application/json
+
+{
+  "title": "Cross field test negative",
+  "description": "123456789012345678901234567890123456789",
+  "severity": "High",
+  "occurredAtUtc": "2026-09-27T12:00:00Z"
+}
+
+### High + опис 40 символів (Очікується: 201 Created)
+POST {{host}}/api/incidents
+Content-Type: application/json
+
+{
+  "title": "Cross field test positive",
+  "description": "1234567890123456789012345678901234567890",
+  "severity": "High",
+  "occurredAtUtc": "2026-09-27T12:00:00Z"
+}
+
+### дублікат title з тим самим регістром (Очікується: 409 Conflict)
+POST {{host}}/api/incidents
+Content-Type: application/json
+
+{
+  "title": "Cross field test positive",
+  "description": "Спроба повторного створення інциденту з таким самим заголовком.",
+  "severity": "Medium",
+  "occurredAtUtc": "2026-09-27T12:00:00Z"
+}
+
+### Т-06  єдиний формат Problem Details (Очікується: 404 Not Found)
+GET {{host}}/api/incidents/99999999-9999-9999-9999-999999999999
+Accept: application/json
+
+
+### перевірка захисту від Over-Posting / Mass Assignment
+POST {{host}}/api/incidents
+Content-Type: application/json
+
+{
+  "title": "Over-posting test incident",
+  "description": "Спроба передати системні поля ownerUserId та status у тілі запиту.",
+  "severity": "Low",
+  "occurredAtUtc": "2026-09-27T12:00:00Z",
+  "id": "00000000-0000-0000-0000-000000000001",
+  "status": "Closed",
+  "ownerUserId": "20000000-0000-0000-0000-000000000002"
+}
