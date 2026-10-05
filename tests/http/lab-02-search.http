@@ -1,5 +1,16 @@
 @baseUrl = http://localhost:5080
 ### Звичайний пошук
-GET {{baseUrl}}/api/incidents/search?q=навчальн
+GET {{baseUrl}}/api/incidents/search?q=USB
+Accept: application/json
+
+### Значення, якого немає
+GET {{baseUrl}}/api/incidents/search?q=zz-no-match
+Accept: application/json
+
+### Єдиний дозволений контрольний ввід: zz-no-match' OR TRUE -- 
+GET {{baseUrl}}/api/incidents/search?q=zz-no-match%27%20OR%20TRUE%20--%20
+Accept: application/json
+
 ### Легітимний апостроф
 GET {{baseUrl}}/api/incidents/search?q=O%27Brien
+Accept: application/json

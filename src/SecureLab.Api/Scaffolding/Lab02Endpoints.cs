@@ -11,19 +11,48 @@ public static class Lab02Endpoints
     {
         app.MapGet("/api/incidents/search", async (string? q, string? sortBy, SecureLabDbContext db, CancellationToken ct) =>
         {
-            var order = sortBy switch
+            var query = db.Incidents.AsNoTracking();
+
+            if (!string.IsNullOrWhiteSpace(q))
             {
-                null or "" or "createdAtUtc" => "created_at_utc DESC",
-                "severity" => "severity", "status" => "status", _ => sortBy
+                var pattern = $"%{q}%";
+                query = query.Where(x => EF.Functions.ILike(x.Title, pattern) || EF.Functions.ILike(x.Description, pattern));
+            }
+
+            var sortedQuery = sortBy switch
+            {
+                null or "" or "createdAtUtc" => query.OrderByDescending(x => x.CreatedAtUtc).ThenBy(x => x.Id),
+                
+                "severity" => query.OrderBy(x => x.Severity == IncidentSeverity.High ? 0 :
+                                                x.Severity == IncidentSeverity.Medium ? 1 : 2)
+                                .ThenBy(x => x.Id),
+
+                "status" => query.OrderBy(x => x.Status == IncidentStatus.New ? 0 :
+                                            x.Status == IncidentStatus.Triaged ? 1 :
+                                            x.Status == IncidentStatus.InProgress ? 2 : 3)
+                                .ThenBy(x => x.Id),
+
+                _ => null
             };
-            var sql = "SELECT * FROM incidents WHERE title ILIKE '%" + (q ?? "")
-                + "%' OR description ILIKE '%" + (q ?? "") + "%' ORDER BY " + order + " LIMIT 50";
-            var rows = await db.Incidents.FromSqlRaw(sql).AsNoTracking().ToListAsync(ct);
-            return Results.Ok(rows.Select(row => new
+
+            if (sortedQuery is null)
             {
-                row.Id, row.Title, row.Description,
-                Severity = row.Severity.ToString(), Status = row.Status.ToString(), row.CreatedAtUtc
-            }));
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["sortBy"] = ["Недопустиме поле для сортування."]
+                });
+            }
+
+            var rows = await sortedQuery.Take(50).ToListAsync(ct);
+
+            return Results.Ok(rows.Select(row => new SearchIncidentResponse(
+                row.Id,
+                row.Title,
+                row.Description,
+                row.Severity.ToString(),
+                row.Status.ToString(),
+                row.CreatedAtUtc
+            )));
         });
         app.MapPost("/api/incidents", async (CreateIncidentRequest request, SecureLabDbContext db, CancellationToken ct) =>
         {
@@ -151,5 +180,14 @@ public sealed record CreatedIncidentResponse(
     string Severity,
     string Status,
     DateTimeOffset OccurredAtUtc,
+    DateTimeOffset CreatedAtUtc
+);
+
+public sealed record SearchIncidentResponse(
+    Guid Id,
+    string Title,
+    string Description,
+    string Severity,
+    string Status,
     DateTimeOffset CreatedAtUtc
 );
