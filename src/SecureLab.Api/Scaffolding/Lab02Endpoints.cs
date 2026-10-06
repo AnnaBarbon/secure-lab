@@ -15,8 +15,9 @@ public static class Lab02Endpoints
 
             if (!string.IsNullOrWhiteSpace(q))
             {
-                var pattern = $"%{q}%";
-                query = query.Where(x => EF.Functions.ILike(x.Title, pattern) || EF.Functions.ILike(x.Description, pattern));
+                var pattern = "%" + EscapeLike(q.Trim()) + "%";
+                query = query.Where(x => EF.Functions.ILike(x.Title, pattern, "\\") 
+                          || EF.Functions.ILike(x.Description, pattern, "\\"));
             }
 
             var sortedQuery = sortBy switch
@@ -167,6 +168,10 @@ public static class Lab02Endpoints
             return Results.Created($"/api/incidents/{incident.Id}", response);
         });
     }
+    private static string EscapeLike(string value) =>
+        value.Replace("\\", "\\\\")
+             .Replace("%", "\\%")
+             .Replace("_", "\\_");
 }
 
 public sealed record CreateIncidentRequest(
