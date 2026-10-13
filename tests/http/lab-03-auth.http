@@ -1,0 +1,32 @@
+@host = http://localhost:5080
+@bobId = 10000000-0000-0000-0000-000000000002
+
+### /api/me без входу (очікується 401)
+GET {{host}}/api/me
+
+### /api/me без cookie, але з X-Demo-UserId Bob (очікується 401)
+GET {{host}}/api/me
+X-Demo-UserId: {{bobId}}
+
+### login Alice (пароль запитується, у файлі не зберігається)
+# @prompt password
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "userName": "alice",
+  "password": "{{password}}"
+}
+
+### /api/me після входу (очікується 200, Alice)
+GET {{host}}/api/me
+
+### /api/me з cookie Alice і X-Demo-UserId Bob (очікується Alice)
+GET {{host}}/api/me
+X-Demo-UserId: {{bobId}}
+
+### logout (очікується 204)
+POST {{host}}/api/auth/logout
+
+### /api/me після logout (очікується 401)
+GET {{host}}/api/me
