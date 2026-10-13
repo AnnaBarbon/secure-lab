@@ -36,22 +36,72 @@ public static class Lab03Identity
 
     public static void MapLab03Identity(this WebApplication app)
     {
-        app.MapPost("/api/auth/register", async (RegistrationInput input, UserManager<ApplicationUser> users) =>
+         app.MapPost("/api/auth/register", async (RegistrationInput input, UserManager<ApplicationUser> users) =>
         {
-            // ЛР 03: завершіть DTO validation та перевірки довірчої межі.
-            if (string.IsNullOrWhiteSpace(input.UserName) || string.IsNullOrWhiteSpace(input.Email)
-                || string.IsNullOrWhiteSpace(input.DisplayName) || string.IsNullOrEmpty(input.Password))
-                return Results.BadRequest();
+            // (UserName/Email varchar(256), DisplayName varchar(120)). Нормалізуємо лише Trim
+            // для userName, email, displayName; password не змінюємо, не логуємо й не повертаємо.
+            var userName = input.UserName?.Trim() ?? string.Empty;
+            var email = input.Email?.Trim() ?? string.Empty;
+            var displayName = input.DisplayName?.Trim() ?? string.Empty;
+            var errors = new Dictionary<string, string[]>();
+
+            if (userName.Length == 0)
+                errors["userName"] = ["Поле userName є обов'язковим."];
+            else if (userName.Length > 256)
+                errors["userName"] = ["userName не може бути довшим за 256 символів."];
+
+            if (email.Length == 0)
+                errors["email"] = ["Поле email є обов'язковим."];
+            else if (email.Length > 256)
+                errors["email"] = ["email не може бути довшим за 256 символів."];
+
+            if (displayName.Length == 0)
+                errors["displayName"] = ["Поле displayName є обов'язковим."];
+            else if (displayName.Length > 120)
+                errors["displayName"] = ["displayName не може бути довшим за 120 символів."];
+
+            if (string.IsNullOrEmpty(input.Password))
+                errors["password"] = ["Поле password є обов'язковим."];
+
+            if (errors.Count > 0)
+                return Results.ValidationProblem(errors);
+
+            // PasswordHash не обчислюємо самі: UserManager перевіряє вимоги до пароля,
+            // хешує його стандартним PasswordHasher і зберігає користувача.
             var user = new ApplicationUser
             {
-                Id = Guid.NewGuid(), UserName = input.UserName.Trim(), Email = input.Email.Trim(),
-                DisplayName = input.DisplayName.Trim()
+                Id = Guid.NewGuid(), UserName = userName, Email = email, DisplayName = displayName
             };
-            var result = await users.CreateAsync(user, input.Password);
-            if (!result.Succeeded) return Results.BadRequest(new { message = "Registration failed" });
+            var result = await users.CreateAsync(user, input.Password!);
+            if (!result.Succeeded)
+            {
+                var codes = result.Errors.Select(error => error.Code).ToArray();
+
+                // Контракт duplicate: зайняте ім'я і зайнятий email дають одну й ту саму 409,
+                // не уточнюючи, яке саме поле збіглося.
+                if (codes.Contains("DuplicateUserName") || codes.Contains("DuplicateEmail"))
+                    return Results.Problem(statusCode: StatusCodes.Status409Conflict,
+                        title: "Registration conflict",
+                        detail: "Обліковий запис із таким ім'ям користувача або email уже існує.");
+
+                // Решта відмов — 400 з назвою поля; текст формує сервер, значення полів не повертаються.
+                var identityErrors = new Dictionary<string, string[]>();
+                if (codes.Any(code => code.StartsWith("Password", StringComparison.Ordinal)))
+                    identityErrors["password"] = ["Пароль не відповідає вимогам: щонайменше 10 символів, "
+                        + "велика й мала латинські літери, цифра та символ, що не є літерою чи цифрою."];
+                if (codes.Contains("InvalidUserName"))
+                    identityErrors["userName"] = ["userName може містити лише латинські літери, цифри та -._@+"];
+                if (codes.Contains("InvalidEmail"))
+                    identityErrors["email"] = ["email має бути коректною адресою."];
+                if (identityErrors.Count == 0)
+                    identityErrors["registration"] = ["Реєстрацію відхилено."];
+                return Results.ValidationProblem(identityErrors);
+            }
+
+            // Роль призначає сервер; у request DTO поля ролі немає.
             var role = await users.AddToRoleAsync(user, DbSeeder.ReporterRole);
             if (!role.Succeeded) throw new InvalidOperationException("Default role assignment failed.");
-            return Results.Created("/api/me", new { user.Id, user.UserName, user.DisplayName });
+            return Results.Created("/api/me", new RegistrationResponse(user.Id, userName, displayName));
         });
         app.MapPost("/api/auth/login", async (LoginInput input, SignInManager<ApplicationUser> signIn) =>
         {
@@ -87,3 +137,4 @@ public static class Lab03Identity
 public sealed record RegistrationInput(string? UserName, string? Email, string? DisplayName, string? Password);
 public sealed record LoginInput(string? UserName, string? Password);
 public sealed record CurrentUserResponse(Guid UserId, string UserName, string Role);
+public sealed record RegistrationResponse(Guid Id, string UserName, string DisplayName);
