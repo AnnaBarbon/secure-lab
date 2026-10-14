@@ -1,3 +1,4 @@
+using System.Threading.RateLimiting;
 using SecureLab.Api.Scaffolding;
 using Microsoft.EntityFrameworkCore;
 using Scalar.AspNetCore;
@@ -22,6 +23,29 @@ builder.Services.AddDbContext<SecureLabDbContext>(options =>
 builder.Services.AddScoped<IncidentQueries>();
 
 builder.AddLab03Identity();
+
+// Обмеження частоти лише для повторних спроб входу.
+// Ключ групи — IP-адреса з'єднання, а не введене ім'я користувача: ключ за ім'ям дав би
+// сторонньому змогу навмисно заблокувати чужий вхід; password чи email ключем не є.
+// IP об'єднує користувачів за спільним NAT — це свідомий компроміс навчального in-memory limiter.
+// Ліміт і вікно читаються з конфігурації (за замовчуванням 5 спроб за 60 с),
+// щоб тестовий host міг задати власні значення без зміни коду.
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("login", httpContext =>
+    {
+        var configuration = httpContext.RequestServices.GetRequiredService<IConfiguration>();
+        return RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = configuration.GetValue("LoginRateLimit:PermitLimit", 5),
+                Window = TimeSpan.FromSeconds(configuration.GetValue("LoginRateLimit:WindowSeconds", 60)),
+                QueueLimit = 0
+            });
+    });
+});
 
 var app = builder.Build();
 
@@ -51,6 +75,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 
 app.UseDefaultFiles();
 app.UseStaticFiles();

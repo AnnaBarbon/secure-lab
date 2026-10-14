@@ -36,7 +36,7 @@ public static class Lab03Identity
 
     public static void MapLab03Identity(this WebApplication app)
     {
-         app.MapPost("/api/auth/register", async (RegistrationInput input, UserManager<ApplicationUser> users) =>
+        app.MapPost("/api/auth/register", async (RegistrationInput input, UserManager<ApplicationUser> users) =>
         {
             // (UserName/Email varchar(256), DisplayName varchar(120)). Нормалізуємо лише Trim
             // для userName, email, displayName; password не змінюємо, не логуємо й не повертаємо.
@@ -103,16 +103,41 @@ public static class Lab03Identity
             if (!role.Succeeded) throw new InvalidOperationException("Default role assignment failed.");
             return Results.Created("/api/me", new RegistrationResponse(user.Id, userName, displayName));
         });
-        app.MapPost("/api/auth/login", async (LoginInput input, SignInManager<ApplicationUser> signIn) =>
+        app.MapPost("/api/auth/login", async (LoginInput input, SignInManager<ApplicationUser> signIn,
+        HttpContext httpContext, ILogger<Program> logger) =>
         {
+            // Подія автентифікації містить лише тип, результат, id користувача після успішної 
+            // перевірки та trace id. Password, введене ім'я при невдалій спробі, cookie, hash, 
+            // token і тіло запиту туди не потрапляють.
             if (string.IsNullOrWhiteSpace(input.UserName) || string.IsNullOrEmpty(input.Password))
+            {
+                logger.LogWarning("Auth event {EventType}: result {Result}, user {UserId}, trace {TraceId}",
+                    "login", "failed", "anonymous", httpContext.TraceIdentifier);
                 return Results.Unauthorized();
+            }
+
             var result = await signIn.PasswordSignInAsync(input.UserName, input.Password, false, false);
-            return result.Succeeded ? Results.NoContent() : Results.Unauthorized();
-        });
-        app.MapPost("/api/auth/logout", async (SignInManager<ApplicationUser> signIn) =>
+            if (!result.Succeeded)
+            {
+                // Однаковий 401 для невідомого користувача і хибного пароля; причину не розкриваємо.
+                logger.LogWarning("Auth event {EventType}: result {Result}, user {UserId}, trace {TraceId}",
+                    "login", "failed", "anonymous", httpContext.TraceIdentifier);
+                return Results.Unauthorized();
+            }
+
+            var user = await signIn.UserManager.FindByNameAsync(input.UserName);
+            var userRef = user?.Id.ToString() ?? "unknown";
+            logger.LogInformation("Auth event {EventType}: result {Result}, user {UserId}, trace {TraceId}",
+                "login", "succeeded", userRef, httpContext.TraceIdentifier);
+            return Results.NoContent();
+        }).RequireRateLimiting("login");
+        app.MapPost("/api/auth/logout", async (SignInManager<ApplicationUser> signIn,
+        HttpContext httpContext, ILogger<Program> logger) =>
         {
+            var userId = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "anonymous";
             await signIn.SignOutAsync();
+            logger.LogInformation("Auth event {EventType}: result {Result}, user {UserId}, trace {TraceId}",
+                "logout", "succeeded", userId, httpContext.TraceIdentifier);
             return Results.NoContent();
         });
         app.MapGet("/api/me", GetCurrentUser).RequireAuthorization();
