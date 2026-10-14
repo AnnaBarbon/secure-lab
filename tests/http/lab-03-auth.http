@@ -8,6 +8,17 @@ GET {{host}}/api/me
 GET {{host}}/api/me
 X-Demo-UserId: {{bobId}}
 
+### CP-03: анонімний POST /api/incidents (очікується 401)
+POST {{host}}/api/incidents
+Content-Type: application/json
+
+{
+  "title": "CP-03 anonymous {{$guid}}",
+  "description": "Анонімна спроба створити інцидент без cookie.",
+  "severity": "Low",
+  "occurredAtUtc": "{{$datetime iso8601}}"
+}
+
 ### login Alice (пароль запитується, у файлі не зберігається)
 # @prompt password
 POST {{host}}/api/auth/login
@@ -24,6 +35,22 @@ GET {{host}}/api/me
 ### /api/me з cookie Alice і X-Demo-UserId Bob (очікується Alice)
 GET {{host}}/api/me
 X-Demo-UserId: {{bobId}}
+
+### CP-03: POST з cookie Alice і підробленим ownerUserId Bob (очікується 201)
+# @name forged
+POST {{host}}/api/incidents
+Content-Type: application/json
+
+{
+  "title": "CP-03 forged owner {{$guid}}",
+  "description": "Підроблене поле ownerUserId не має змінити власника.",
+  "severity": "Low",
+  "occurredAtUtc": "{{$datetime iso8601}}",
+  "ownerUserId": "{{bobId}}"
+}
+
+### CP-03: деталі створеного запису (очікується ownerDisplayName = Аліса Коваль)
+GET {{host}}/api/incidents/{{forged.response.body.$.id}}
 
 ### logout (очікується 204)
 POST {{host}}/api/auth/logout

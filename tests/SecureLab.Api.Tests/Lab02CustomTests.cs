@@ -11,12 +11,22 @@ namespace SecureLab.Api.Tests;
 
 public sealed class Lab02CustomTests(SecureLabApiFactory factory) : IClassFixture<SecureLabApiFactory>
 {
+    // Анонімний клієнт лишається для пошуку (GET не захищено в ЛР 03).
     private readonly HttpClient _client = factory.CreateClient();
+
+    // ЛР 03: POST /api/incidents захищено, тому перевірки створення (201/400/409)
+    // виконуються від імені Alice через справжню cookie. Анонімний 401 перевіряє A-01.
+    private static string StudyPassword =>
+        Environment.GetEnvironmentVariable("SeedUsers__Password")
+        ?? throw new InvalidOperationException("Set local SeedUsers__Password outside Git.");
+
+    private Task<HttpClient> LoginAliceAsync() => factory.LoginAsync("alice", StudyPassword);
 
     // T-01: Коректне створення інциденту (201 Created)
     [Fact]
     public async Task T01_CreateIncident_ValidData_Returns201Created()
     {
+        using var alice = await LoginAliceAsync();
         var title = $"T01-{Guid.NewGuid():N}";
         var body = new
         {
@@ -28,7 +38,7 @@ public sealed class Lab02CustomTests(SecureLabApiFactory factory) : IClassFixtur
 
         try
         {
-            using var response = await _client.PostAsJsonAsync("/api/incidents", body);
+            using var response = await alice.PostAsJsonAsync("/api/incidents", body);
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
 
             var json = await response.Content.ReadAsStringAsync();
@@ -47,6 +57,7 @@ public sealed class Lab02CustomTests(SecureLabApiFactory factory) : IClassFixtur
     [Fact]
     public async Task T02_CreateIncident_EmptyTitleAndInvalidSeverity_Returns400()
     {
+        using var alice = await LoginAliceAsync();
         var body = new
         {
             title = "",
@@ -55,7 +66,7 @@ public sealed class Lab02CustomTests(SecureLabApiFactory factory) : IClassFixtur
             occurredAtUtc = DateTimeOffset.UtcNow
         };
 
-        using var response = await _client.PostAsJsonAsync("/api/incidents", body);
+        using var response = await alice.PostAsJsonAsync("/api/incidents", body);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
 
@@ -71,6 +82,7 @@ public sealed class Lab02CustomTests(SecureLabApiFactory factory) : IClassFixtur
     [Fact]
     public async Task T03_CreateIncident_DuplicateActiveTitle_Returns409Conflict()
     {
+        using var alice = await LoginAliceAsync();
         var title = $"T03-{Guid.NewGuid():N}";
         var body = new
         {
@@ -83,11 +95,11 @@ public sealed class Lab02CustomTests(SecureLabApiFactory factory) : IClassFixtur
         try
         {
             // Створюємо перший інцидент зі статусом New
-            using var firstResponse = await _client.PostAsJsonAsync("/api/incidents", body);
+            using var firstResponse = await alice.PostAsJsonAsync("/api/incidents", body);
             Assert.Equal(HttpStatusCode.Created, firstResponse.StatusCode);
 
             // Спроба створити другий інцидент з тим самим title
-            using var duplicateResponse = await _client.PostAsJsonAsync("/api/incidents", body);
+            using var duplicateResponse = await alice.PostAsJsonAsync("/api/incidents", body);
             Assert.Equal(HttpStatusCode.Conflict, duplicateResponse.StatusCode);
         }
         finally
@@ -156,6 +168,7 @@ public sealed class Lab02CustomTests(SecureLabApiFactory factory) : IClassFixtur
     [Fact]
     public async Task T10_CreateIncident_OccurredAtUtcTooOld_Returns400()
     {
+        using var alice = await LoginAliceAsync();
         var body = new
         {
             title = $"T10-{Guid.NewGuid():N}",
@@ -164,7 +177,7 @@ public sealed class Lab02CustomTests(SecureLabApiFactory factory) : IClassFixtur
             occurredAtUtc = DateTimeOffset.UtcNow.AddDays(-366) // старше за 365 днів
         };
 
-        using var response = await _client.PostAsJsonAsync("/api/incidents", body);
+        using var response = await alice.PostAsJsonAsync("/api/incidents", body);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
         var json = await response.Content.ReadAsStringAsync();
@@ -178,6 +191,7 @@ public sealed class Lab02CustomTests(SecureLabApiFactory factory) : IClassFixtur
     [Fact]
     public async Task A02_CreateIncident_OverpostingIgnored_ServerValuesEnforced()
     {
+        using var alice = await LoginAliceAsync();
         var title = $"A02-{Guid.NewGuid():N}";
         var fakeId = Guid.NewGuid();
         var fakeOwner = Guid.NewGuid();
@@ -197,7 +211,7 @@ public sealed class Lab02CustomTests(SecureLabApiFactory factory) : IClassFixtur
 
         try
         {
-            using var response = await _client.PostAsJsonAsync("/api/incidents", body);
+            using var response = await alice.PostAsJsonAsync("/api/incidents", body);
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
 
             var json = await response.Content.ReadAsStringAsync();
@@ -210,7 +224,7 @@ public sealed class Lab02CustomTests(SecureLabApiFactory factory) : IClassFixtur
             Assert.NotEqual(fakeId, createdId);
             Assert.Equal("New", createdStatus);
 
-            // Перевіряємо напряму в БД призначення власника Alice
+            // Перевіряємо напряму в БД: власник — Alice
             await using var scope = factory.Services.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<SecureLabDbContext>();
             var saved = await db.Incidents.SingleAsync(i => i.Title == title);

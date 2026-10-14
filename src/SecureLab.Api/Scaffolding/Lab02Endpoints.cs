@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
 using SecureLab.Api.Data;
 using SecureLab.Api.Data.Entities;
@@ -55,8 +56,18 @@ public static class Lab02Endpoints
                 row.CreatedAtUtc
             )));
         });
-        app.MapPost("/api/incidents", async (CreateIncidentRequest request, SecureLabDbContext db, CancellationToken ct) =>
+        // ЛР 03: створення вимагає автентифікації (.RequireAuthorization() нижче).
+        app.MapPost("/api/incidents", async (CreateIncidentRequest request, HttpContext httpContext,
+            SecureLabDbContext db, CancellationToken ct) =>
         {
+            // ЛР 03: власника бере сервер лише з verified principal (claim NameIdentifier із cookie).
+            // ownerUserId з JSON, X-Demo-UserId чи стала константа ЛР 2 не використовуються.
+            var userId = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (!Guid.TryParse(userId, out var verifiedUserId))
+            {
+                return Results.Problem(statusCode: StatusCodes.Status500InternalServerError);
+            }
+
             var now = DateTimeOffset.UtcNow;
             var errors = new Dictionary<string, string[]>();
 
@@ -142,7 +153,7 @@ public static class Lab02Endpoints
             var incident = new Incident
             {
                 Id = Guid.NewGuid(),
-                OwnerUserId = DbSeeder.AliceId,
+                OwnerUserId = verifiedUserId,
                 Title = normalizedTitle,
                 Description = normalizedDescription,
                 Severity = parsedSeverity,
@@ -166,7 +177,7 @@ public static class Lab02Endpoints
             );
 
             return Results.Created($"/api/incidents/{incident.Id}", response);
-        });
+        }).RequireAuthorization();
     }
     private static string EscapeLike(string value) =>
         value.Replace("\\", "\\\\")
