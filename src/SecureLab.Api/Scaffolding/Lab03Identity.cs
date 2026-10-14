@@ -116,7 +116,20 @@ public static class Lab03Identity
                 return Results.Unauthorized();
             }
 
-            var result = await signIn.PasswordSignInAsync(input.UserName, input.Password, false, false);
+            var user = await signIn.UserManager.FindByNameAsync(input.UserName);
+            if (user is null)
+            {
+                // Усунутий auth defect: без цього невідоме ім'я відповідало швидше (без PBKDF2),
+                // і за часом можна було визначити, чи існує акаунт. Виконуємо ту саму роботу
+                // стандартного hasher над фіктивним hash і повертаємо той самий 401.
+                _ = signIn.UserManager.PasswordHasher.VerifyHashedPassword(
+                    TimingDummyUser, TimingDummyHash.Value, input.Password);
+                logger.LogWarning("Auth event {EventType}: result {Result}, user {UserId}, trace {TraceId}",
+                    "login", "failed", "anonymous", httpContext.TraceIdentifier);
+                return Results.Unauthorized();
+            }
+
+            var result = await signIn.PasswordSignInAsync(user, input.Password, false, false);
             if (!result.Succeeded)
             {
                 // Однаковий 401 для невідомого користувача і хибного пароля; причину не розкриваємо.
@@ -125,8 +138,7 @@ public static class Lab03Identity
                 return Results.Unauthorized();
             }
 
-            var user = await signIn.UserManager.FindByNameAsync(input.UserName);
-            var userRef = user?.Id.ToString() ?? "unknown";
+            var userRef = user.Id.ToString();
             logger.LogInformation("Auth event {EventType}: result {Result}, user {UserId}, trace {TraceId}",
                 "login", "succeeded", userRef, httpContext.TraceIdentifier);
             return Results.NoContent();
@@ -144,6 +156,13 @@ public static class Lab03Identity
         // Приклад лише mechanics: не повертає identity і не реалізує оцінювану operation.
         app.MapGet("/api/auth/session-check", () => Results.NoContent()).RequireAuthorization();
     }
+        // Фіктивний користувач і hash стандартного формату Identity з випадковим паролем:
+    // використовуються лише для однакової роботи hasher при невідомому імені, збігу бути не може.
+    private static readonly ApplicationUser TimingDummyUser = new() { DisplayName = "timing-dummy" };
+
+    private static readonly Lazy<string> TimingDummyHash = new(() =>
+        new PasswordHasher<ApplicationUser>().HashPassword(
+            TimingDummyUser, "Td-" + Guid.NewGuid().ToString("N") + "-9z"));
     private static IResult GetCurrentUser(HttpContext httpContext)
     {
         var userId = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
