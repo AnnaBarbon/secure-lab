@@ -1,0 +1,115 @@
+@host = http://localhost:5080
+@aliceId = 20000000-0000-0000-0000-000000000001
+@bobId = 20000000-0000-0000-0000-000000000002
+@aliceNewId = 20000000-0000-0000-0000-000000000003
+@missingId = 20000000-0000-0000-0000-0000000000ff
+@bobCommentId = 30000000-0000-0000-0000-000000000002
+@aliceInternalCommentId = 30000000-0000-0000-0000-000000000003
+@aliceSearchId = 20000000-0000-0000-0000-000000000005
+
+### 1. Alice login; REST Client reads process environment
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{ "userName": "alice", "password": "{{$processEnv SeedUsers__Password}}" }
+
+### 2. Own details (A-02)
+GET {{host}}/api/incidents/{{aliceId}}
+Accept: application/json
+
+### 3. Foreign details with the same Alice cookie (A-03)
+GET {{host}}/api/incidents/{{bobId}}
+Accept: application/json
+
+### 4. Unknown id with the same Alice cookie (A-10)
+GET {{host}}/api/incidents/{{missingId}}
+Accept: application/json
+
+### 5. List as Alice (A-05)
+GET {{host}}/api/incidents
+Accept: application/json
+
+### 6. Search as Alice: incident Bob 0004 (A-11)
+GET {{host}}/api/incidents/search?q=O'Brien
+Accept: application/json
+
+### 7. Severity summary as Alice (A-11)
+GET {{host}}/api/incidents/severity-summary
+Accept: application/json
+
+### 8. Foreign update by Alice: PUT Bob incident (A-04)
+PUT {{host}}/api/incidents/{{bobId}}
+Content-Type: application/json
+
+{ "title": "Змінено Alice", "description": "Alice змінила чужий інцидент у локальному PoC." }
+
+### 9. Bob incident after foreign update (same Alice cookie)
+GET {{host}}/api/incidents/{{bobId}}
+Accept: application/json
+
+### 10. Own update by Alice with forged fields (A-08a)
+PUT {{host}}/api/incidents/{{aliceId}}
+Content-Type: application/json
+
+{
+  "title": "Підозрілий лист із вкладенням (оновлено)",
+  "description": "Одержано лист нібито від деканату. Вкладення не відкривалося. Додано уточнення.",
+  "ownerUserId": "10000000-0000-0000-0000-000000000002",
+  "status": "Closed",
+  "severity": "Critical",
+  "role": "Administrator"
+}
+
+### 11. Vertical: Reporter Alice triages own New incident (A-06)
+POST {{host}}/api/incidents/{{aliceNewId}}/triage
+Content-Type: application/json
+
+{ "note": "Спроба Reporter", "role": "Analyst", "isTransitionAllowed": true }
+
+### 12. Alice incident 0003 after triage attempt
+GET {{host}}/api/incidents/{{aliceNewId}}
+Accept: application/json
+
+### 13. Child resource: Bob comment by direct id (A-12)
+GET {{host}}/api/incident-comments/{{bobCommentId}}
+Accept: application/json
+
+### 14. Child resource: internal comment of own incident (A-12)
+GET {{host}}/api/incident-comments/{{aliceInternalCommentId}}
+Accept: application/json
+
+### 15. Bob login changes current identity
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{ "userName": "bob", "password": "{{$processEnv SeedUsers__Password}}" }
+
+### 16. Bob own details
+GET {{host}}/api/incidents/{{bobId}}
+Accept: application/json
+
+### 17. Morgan login; Analyst read
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{ "userName": "morgan", "password": "{{$processEnv SeedUsers__Password}}" }
+
+### 18. Permitted Analyst read (A-03R)
+GET {{host}}/api/incidents/{{aliceId}}
+Accept: application/json
+
+### 19. Analyst content update is not allowed by matrix
+PUT {{host}}/api/incidents/{{aliceId}}
+Content-Type: application/json
+
+{ "title": "Змінено Morgan", "description": "Analyst не має права змінювати вміст." }
+
+### 20. Analyst reads internal comment after parent check
+GET {{host}}/api/incident-comments/{{aliceInternalCommentId}}
+Accept: application/json
+
+### 21. Permitted transition: Analyst triages New incident 0005 (A-07)
+POST {{host}}/api/incidents/{{aliceSearchId}}/triage
+Content-Type: application/json
+
+{ "note": "Первинну оцінку виконано аналітиком." }
