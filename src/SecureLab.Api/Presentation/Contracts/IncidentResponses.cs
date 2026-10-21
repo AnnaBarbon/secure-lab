@@ -28,3 +28,11 @@ public sealed record IncidentCommentResponse(
 public sealed record IncidentSeveritySummaryResponse(
     string Severity,
     int Count);
+
+public sealed record IncidentCommentDetailsResponse(
+    Guid Id,
+    Guid IncidentId,
+    string AuthorDisplayName,
+    string Text,
+    bool IsInternal,
+    DateTimeOffset CreatedAtUtc);

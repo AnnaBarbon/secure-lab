@@ -10,9 +10,21 @@ public static class Lab02Endpoints
 {
     public static void MapLab02Endpoints(this WebApplication app)
     {
-        app.MapGet("/api/incidents/search", async (string? q, string? sortBy, SecureLabDbContext db, CancellationToken ct) =>
+        // ЛР 4: пошук вимагає автентифікації й обмежений тим самим правилом видимості, що й список.
+        app.MapGet("/api/incidents/search", async (string? q, string? sortBy, HttpContext httpContext,
+            SecureLabDbContext db, CancellationToken ct) =>
         {
-            var query = db.Incidents.AsNoTracking();
+            var userIdValue = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!Guid.TryParse(userIdValue, out var ownerId))
+            {
+                return Results.Challenge();
+            }
+
+            // Роль — лише з server-issued claim; умова стоїть у запиті до сортування й Take(50).
+            var canReadAll = httpContext.User.IsInRole(DbSeeder.AnalystRole);
+            var query = db.Incidents
+                .AsNoTracking()
+                .Where(x => canReadAll || x.OwnerUserId == ownerId);
 
             if (!string.IsNullOrWhiteSpace(q))
             {
@@ -55,7 +67,7 @@ public static class Lab02Endpoints
                 row.Status.ToString(),
                 row.CreatedAtUtc
             )));
-        });
+        }).RequireAuthorization();
         // ЛР 03: створення вимагає автентифікації (.RequireAuthorization() нижче).
         app.MapPost("/api/incidents", async (CreateIncidentRequest request, HttpContext httpContext,
             SecureLabDbContext db, CancellationToken ct) =>

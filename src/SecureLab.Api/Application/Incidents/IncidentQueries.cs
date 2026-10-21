@@ -9,11 +9,15 @@ public sealed class IncidentQueries(SecureLabDbContext dbContext, ILogger<Incide
 {
     public async Task<IReadOnlyList<IncidentListItemResponse>> GetListAsync(
         IncidentStatus? status,
+        Guid ownerId,
+        bool canReadAll,
         CancellationToken cancellationToken)
     {
         logger.LogInformation("Loading incidents with status filter {Status}", status);
 
-        var query = dbContext.Incidents.AsNoTracking();
+        var query = dbContext.Incidents
+            .AsNoTracking()
+            .Where(incident => canReadAll || incident.OwnerUserId == ownerId);
         if (status is not null)
         {
             query = query.Where(incident => incident.Status == status);
@@ -31,7 +35,10 @@ public sealed class IncidentQueries(SecureLabDbContext dbContext, ILogger<Incide
             .ToListAsync(cancellationToken);
     }
 
-    public Task<IncidentDetailsResponse?> GetDetailsAsync(Guid id, CancellationToken cancellationToken)
+    public Task<IncidentDetailsResponse?> GetDetailsAsync(
+        Guid id,
+        bool includeInternalComments,
+        CancellationToken cancellationToken)
     {
         logger.LogInformation("Loading incident {IncidentId}", id);
 
@@ -48,7 +55,8 @@ public sealed class IncidentQueries(SecureLabDbContext dbContext, ILogger<Incide
                 incident.CreatedAtUtc,
                 incident.Owner.DisplayName,
                 incident.Comments
-                    .Where(comment => !comment.IsInternal)
+                    // ЛР 4: internal comment лише за рішенням handler (Analyst).
+                    .Where(comment => includeInternalComments || !comment.IsInternal)
                     .OrderBy(comment => comment.CreatedAtUtc)
                     .Select(comment => new IncidentCommentResponse(
                         comment.Id,
@@ -61,10 +69,14 @@ public sealed class IncidentQueries(SecureLabDbContext dbContext, ILogger<Incide
 
     public async Task<IReadOnlyList<IncidentSeveritySummaryResponse>> GetSeveritySummaryAsync(
         string? statusFilter,
+        Guid ownerId,
+        bool canReadAll,
         string traceId,
         CancellationToken cancellationToken = default)
     {
-        var query = dbContext.Incidents.AsNoTracking();
+        var query = dbContext.Incidents
+            .AsNoTracking()
+            .Where(incident => canReadAll || incident.OwnerUserId == ownerId);
 
         if (!string.IsNullOrWhiteSpace(statusFilter) &&
             Enum.TryParse<IncidentStatus>(statusFilter, ignoreCase: true, out var parsedStatus))

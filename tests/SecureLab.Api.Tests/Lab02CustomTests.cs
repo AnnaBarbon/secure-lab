@@ -11,9 +11,6 @@ namespace SecureLab.Api.Tests;
 
 public sealed class Lab02CustomTests(SecureLabApiFactory factory) : IClassFixture<SecureLabApiFactory>
 {
-    // Анонімний клієнт лишається для пошуку (GET не захищено в ЛР 03).
-    private readonly HttpClient _client = factory.CreateClient();
-
     // ЛР 03: POST /api/incidents захищено, тому перевірки створення (201/400/409)
     // виконуються від імені Alice через справжню cookie. Анонімний 401 перевіряє A-01.
     private static string StudyPassword =>
@@ -21,6 +18,11 @@ public sealed class Lab02CustomTests(SecureLabApiFactory factory) : IClassFixtur
         ?? throw new InvalidOperationException("Set local SeedUsers__Password outside Git.");
 
     private Task<HttpClient> LoginAliceAsync() => factory.LoginAsync("alice", StudyPassword);
+
+    // ЛР 4: пошук вимагає автентифікації й обмежений правилом видимості.
+    // Тести механіки пошуку ЛР 2 перевіряють seed-записи різних власників,
+    // тому виконуються від імені Analyst, який за матрицею бачить усі інциденти.
+    private Task<HttpClient> LoginAnalystAsync() => factory.LoginAsync("morgan", StudyPassword);
 
     // T-01: Коректне створення інциденту (201 Created)
     [Fact]
@@ -115,17 +117,18 @@ public sealed class Lab02CustomTests(SecureLabApiFactory factory) : IClassFixtur
     [Fact]
     public async Task S02_RetestSqlInjection_ReturnsEmpty_AndPositiveControlPasses()
     {
+        using var analyst = await LoginAnalystAsync();
         // 1. Контрольний запит C (SQLi вектор). Очікуємо 200 OK та порожню вибірку
         var sqliQuery = "zz-no-match' OR TRUE -- ";
         var sqliUrl = "/api/incidents/search?q=" + Uri.EscapeDataString(sqliQuery);
 
-        var sqliResults = await _client.GetFromJsonAsync<List<SearchIncidentResponse>>(sqliUrl);
+        var sqliResults = await analyst.GetFromJsonAsync<List<SearchIncidentResponse>>(sqliUrl);
         Assert.NotNull(sqliResults);
         Assert.Empty(sqliResults);
 
         // 2. Позитивний контроль: q=USB повинен повернути рівно один запис (Id ...0005)
         var positiveUrl = "/api/incidents/search?q=USB";
-        var positiveResults = await _client.GetFromJsonAsync<List<SearchIncidentResponse>>(positiveUrl);
+        var positiveResults = await analyst.GetFromJsonAsync<List<SearchIncidentResponse>>(positiveUrl);
         Assert.NotNull(positiveResults);
         var incident = Assert.Single(positiveResults);
         Assert.Equal(Guid.Parse("20000000-0000-0000-0000-000000000005"), incident.Id);
@@ -135,16 +138,17 @@ public sealed class Lab02CustomTests(SecureLabApiFactory factory) : IClassFixtur
     [Fact]
     public async Task T04_Search_WithApostrophes_Returns200AndExpectedEntities()
     {
+        using var analyst = await LoginAnalystAsync();
         // Перевірка O'Brien
         var obrienUrl = "/api/incidents/search?q=" + Uri.EscapeDataString("O'Brien");
-        var obrienResults = await _client.GetFromJsonAsync<List<SearchIncidentResponse>>(obrienUrl);
+        var obrienResults = await analyst.GetFromJsonAsync<List<SearchIncidentResponse>>(obrienUrl);
         Assert.NotNull(obrienResults);
         Assert.Single(obrienResults);
         Assert.Equal(Guid.Parse("20000000-0000-0000-0000-000000000004"), obrienResults[0].Id);
 
         // Перевірка українського апострофа U+0027
         var ukrUrl = "/api/incidents/search?q=" + Uri.EscapeDataString("комп'ютерного");
-        var ukrResults = await _client.GetFromJsonAsync<List<SearchIncidentResponse>>(ukrUrl);
+        var ukrResults = await analyst.GetFromJsonAsync<List<SearchIncidentResponse>>(ukrUrl);
         Assert.NotNull(ukrResults);
         Assert.Single(ukrResults);
         Assert.Equal(Guid.Parse("20000000-0000-0000-0000-000000000003"), ukrResults[0].Id);
@@ -154,7 +158,8 @@ public sealed class Lab02CustomTests(SecureLabApiFactory factory) : IClassFixtur
     [Fact]
     public async Task T05_Search_UnknownSortBy_Returns400WithSortByKey()
     {
-        using var response = await _client.GetAsync("/api/incidents/search?sortBy=price");
+        using var analyst = await LoginAnalystAsync();
+        using var response = await analyst.GetAsync("/api/incidents/search?sortBy=price");
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
 

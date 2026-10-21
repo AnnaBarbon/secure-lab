@@ -7,6 +7,9 @@
 @aliceInternalCommentId = 30000000-0000-0000-0000-000000000003
 @aliceSearchId = 20000000-0000-0000-0000-000000000005
 
+# Пароль береться зі змінної середовища SeedUsers__Password; у файлі його немає.
+# Запускайте блоки по черзі зверху вниз: кожен login змінює поточну cookie.
+
 ### 1. Alice login; REST Client reads process environment
 POST {{host}}/api/auth/login
 Content-Type: application/json
@@ -45,6 +48,10 @@ Content-Type: application/json
 
 ### 9. Bob incident after foreign update (same Alice cookie)
 GET {{host}}/api/incidents/{{bobId}}
+Accept: application/json
+
+### 9a. Foreign delete by Alice (A-04)
+DELETE {{host}}/api/incidents/{{bobId}}
 Accept: application/json
 
 ### 10. Own update by Alice with forged fields (A-08a)
@@ -106,6 +113,10 @@ Content-Type: application/json
 
 ### 20. Analyst reads internal comment after parent check
 GET {{host}}/api/incident-comments/{{aliceInternalCommentId}}
+Accept: application/json
+
+### 20a. Analyst delete is not allowed by matrix
+DELETE {{host}}/api/incidents/{{aliceNewId}}
 Accept: application/json
 
 ### 21. Permitted transition: Analyst triages New incident 0005 (A-07)

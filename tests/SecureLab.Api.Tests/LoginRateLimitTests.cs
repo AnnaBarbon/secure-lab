@@ -60,7 +60,8 @@ public sealed class LoginRateLimitTests(SecureLabApiFactory factory) : IClassFix
         Assert.False(limitedValid.Headers.Contains("Set-Cookie"), "Rate-limited login issued a cookie.");
 
         // Ліміт стосується лише login: інший endpoint того самого host працює.
-        using var unrelated = await client.GetAsync("/api/incidents");
+        // ЛР 4: /api/incidents тепер вимагає входу, тому перевіряється анонімний /health.
+        using var unrelated = await client.GetAsync("/health");
         Assert.Equal(HttpStatusCode.OK, unrelated.StatusCode);
 
         // Відновлення: після повного вікна з невеликим запасом вхід знову можливий.
