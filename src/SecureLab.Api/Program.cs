@@ -92,7 +92,7 @@ app.Use(async (context, next) =>
 
     if (!isDevelopmentApiReference)
     {
-        context.Response.Headers["Content-Security-Policy-Report-Only"] = csp;
+        context.Response.Headers["Content-Security-Policy"] = csp;
     }
 
     await next(context);
