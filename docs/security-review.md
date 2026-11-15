@@ -41,7 +41,47 @@
 
 Login і register внесіть до таблиці з позначкою Cookie authentication = ні та окремим рішенням щодо ризику й меж огляду. Logout входить до cookie-периметра; перевірка токена — до SignOutAsync.
 ## 9. Dependency and secret audit
-Для всіх рівнів: огляд поточної відстежуваної конфігурації й класифікація кожного збігу пошуку. Для доброго рівня додатково: таблиця рішень щодо залежностей, систематичний пошук у поточних відстежуваних файлах, повний огляд журналів і аудиту. Перевіряти всю історію не обов’язково — зазначте фактичні межі. Перевірки доброго рівня, які ви не виконували на достатньому, позначте «Не входить до обраного рівня», а не PASS.
+### 9.1. Секрети й конфігурація (етап 1, п. 3)
+
+Межі: поточні відстежувані файли на commit 05ae77e; історія переглянута лише для src/SecureLab.Api/appsettings.Development.json. Пошук виконано засобами Git, без сторонніх сервісів.
+
+Команди:
+- git ls-files '*appsettings*.json' '*.env*' '*compose*.yml' '*compose*.yaml' '*.config' -> 4 файли: infra/.env.example, infra/compose.yaml, src/SecureLab.Api/appsettings.json, src/SecureLab.Api/appsettings.Development.json
+- git check-ignore -v infra/.env appsettings.Local.json keys/key.pfx -> ігноруються правилами .gitignore:15 (.env), .gitignore:18 (appsettings.Local.json), .gitignore:19 (*.pfx)
+- git grep -n -I -i -E 'password|passwd|secret|api.?key' -- . -> 199 збігів у 34 файлах
+- git grep -n -I 'local-study-password' -- . -> 4 збіги
+- git grep -n -I 'SeedUsers__Password' -- . -> лише читання змінної середовища
+- git log --all --follow --oneline -- src/SecureLab.Api/appsettings.Development.json -> один commit 93974ce (Initial starter commit)
+
+| Шлях:рядок | Безпечний контекст | Рішення | Причина й межа |
+|---|---|---|---|
+| infra/compose.yaml:9 | пароль локального контейнера PostgreSQL, порт прив'язано до 127.0.0.1 | accepted, study-only | відкрите навчальне значення, README.md:63 забороняє повторне використання; не поширюється на інші БД і середовища |
+| src/SecureLab.Api/appsettings.Development.json:3 | connection string лише для Development і 127.0.0.1:54329 | accepted, study-only | те саме навчальне значення; реальний connection string передається поза Git через ConnectionStrings__SecureLab |
+| src/SecureLab.Api/Data/SecureLabDesignTimeDbContextFactory.cs:10 | connection string для інструментів EF Core під час розробки | accepted, study-only | те саме навчальне значення, використовується лише локально для migrations |
+| README.md:63 | документація про навчальні значення | не секрет | пояснення і заборона повторного використання |
+| tests/SecureLab.Api.Tests/*.cs (AuthEventsTests, AuthenticationMechanicsTests, CookieFlagsTests, IncidentEndpointTests, Lab02CustomTests, Lab03SecurityTests, Lab04AuthorizationTests, LoginRateLimitTests, LoginTimingDefectTests, SearchMechanicsTests) | Environment.GetEnvironmentVariable("SeedUsers__Password") | не секрет | тест читає пароль зі змінної середовища; значення в Git немає |
+| tests/http/lab-04-access.http:10, 17, 92, 102 | {{$processEnv SeedUsers__Password}} | не секрет | REST Client бере значення із середовища процесу |
+| tests/http/lab-03-auth.http:23, 29 | # @prompt password | не секрет | пароль вводиться вручну під час запуску |
+| src/SecureLab.Api/Data/DbSeeder.cs | ключ конфігурації SeedUsers:Password | не секрет | код читає ключ; значення задається поза Git |
+| src/SecureLab.Api/Scaffolding/Lab03Identity.cs, Client/auth-lab.html, Client/auth-lab.js | назви полів password у DTO і формі входу | не секрет | назва поля, значення немає |
+| src/SecureLab.Api/Data/Migrations/*.cs | стовпець PasswordHash таблиці Identity | не секрет | схема БД, хеш не є паролем і в Git не зберігається |
+| tests/SecureLab.Api.Tests/PasswordHasherUpgradeTests.cs та ін. | назви тестів і змінних про password hasher | не секрет | код тестів, без значень |
+| tests/SecureLab.Api.Tests/packages.lock.json:208, 291 | Microsoft.Extensions.Configuration.UserSecrets | не секрет | ідентифікатор пакета |
+| .gitignore:14, docs/*.md, src/SecureLab.Api/Program.cs:32 | коментарі й документація | не секрет | згадка слова, значення немає |
+
+Результат: реального credential у поточних відстежуваних файлах не знайдено. Навчальний пароль seed-акаунтів у Git відсутній.
+
+| Перевірка | Очікуваний результат | Доказ | Межа висновку |
+|---|---|---|---|
+| .env.example | тільки безпечні значення | Get-Content infra/.env.example: лише POSTGRES_PORT=54329 і коментар | не доводить відсутність секрету в невідстежуваному файлі |
+| tracked configuration | немає реального credential; навчальні значення класифіковано | команди й таблиця вище | не доводить відсутність у всій історії або зовнішньому CI |
+| історія appsettings.Development.json | немає непогодженого значення | git log --all --follow: один commit 93974ce | не охоплює чужі fork, видалені refs, stash, інші клони; це не повне forensic-розслідування |
+
+Чому видалення з поточного файла недостатньо: якщо реальний credential колись потрапив у Git, він лишається в історії комітів, у всіх клонах і fork, у кеші CI та в журналах. Видалення з поточного файла прибирає лише останню версію. Тому витеклий credential треба вважати скомпрометованим: відкликати або замінити (rotation) у самій системі (новий пароль БД, новий ключ), перевірити журнали на використання старого значення і лише після цього прибрати його з поточного стану. Переписувати історію Git без окремої інструкції не потрібно.
+
+### 9.2. Залежності
+
+Заповнюється на етапі 3.
 ## 10. Residual risks
 Неперевірені й тимчасово прийняті ризики, відповідальний і наступна дія.
 ## 11. Conclusion
