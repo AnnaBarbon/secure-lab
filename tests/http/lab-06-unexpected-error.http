@@ -1,0 +1,6 @@
+### Production broken DB; anonymous public login, synthetic input
+POST http://localhost:5080/api/auth/login
+Content-Type: application/json
+Accept: application/problem+json
+
+{"userName":"alice","password":"NotARealPassword1!"}

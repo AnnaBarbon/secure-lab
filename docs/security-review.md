@@ -23,7 +23,42 @@
 
 Таблицю буде доповнено результатами перевірок.
 ## 4. Methodology та test environment
-Відомий початковий стан, яка саме локальна БД, хеші початку й кінця, профіль запуску, конкретний клієнт і сеанс, команди та їхні коди завершення.
+Початковий стан: commit 7bac4abbee19438b41e97919a02e9792aa6f0900 (main), стартова перевірка 15.11.2026: git status чистий, теги v0.1.0...v0.5.0 на місці, dotnet --version 10.0.302, dotnet restore --locked-mode і dotnet build -c Release без помилок, PostgreSQL у Docker Healthy, reset/seed виконано, dotnet test -c Release: 56 з 56, /health -> {"status":"ready"}.
+
+БД: лише локальна навчальна PostgreSQL у контейнері secure-lab-postgres-1 (127.0.0.1:54329, база securelab). Reset виконується тільки в Development командою dotnet run --project src/SecureLab.Api -- --reset-database. Пароль навчальних акаунтів задається змінною SeedUsers__Password поза Git і в доказах не показується.
+
+Профілі запуску:
+- Development: dotnet run --project src/SecureLab.Api --launch-profile http
+- Production-like: змінні ASPNETCORE_ENVIRONMENT=Production, ASPNETCORE_URLS=http://localhost:5080, ConnectionStrings__SecureLab (навчальний рядок поза Git), Logging__Console__IncludeScopes=true; запуск dotnet run --project src/SecureLab.Api --no-launch-profile -c Release, щоб launchSettings.json не перекрив environment.
+
+Клієнти: Chrome (браузерний flow), VS Code REST Client (tests/http), PowerShell curl.exe (заголовки), xUnit TestServer (dotnet test).
+
+### Етап 1, п. 4-5. Production-like профіль і безпечна помилка
+
+| Перевірка | Результат |
+|---|---|
+| Profile активний | у консолі Hosting environment: Production і Now listening on: http://localhost:5080 |
+| GET /health | 200, {"status":"ready"}; є nosniff, no-referrer, CSP |
+| GET /openapi/v1.json | 404, application/problem+json: OpenAPI реєструється лише в Development |
+| GET /scalar/v1 | 200, text/html, тіло починається з <!doctype html> клієнта: це fallback на index.html, а не Scalar |
+| Reset у Production | процес завершується з InvalidOperationException "Reset даних дозволено лише в явно налаштованому Development environment."; дані не змінено |
+| Джерело connection string | ConnectionStrings__SecureLab поза Git; appsettings.Development.json у Production не читається; Include Error Detail=false |
+| Database:ApplyMigrationsOnStartup, Database:AllowReset | false в appsettings.json (Production) |
+| AllowedHosts | "*": фільтрацію Host вимкнено; для локального стенда наслідок обмежений, для реального deployment потребує окремого рішення (residual risk) |
+| HTTPS/HSTS | локальний запуск лише HTTP; UseHttpsRedirection і UseHsts не налаштовані; це не доказ безпеки транспорту в production |
+
+Контрольована помилка: Production, connection string на недоступний порт 54399, запит tests/http/lab-06-unexpected-error.http (публічний login з вигаданим паролем).
+
+| Канал | Що отримано | Чого немає |
+|---|---|---|
+| HTTP-відповідь | 500, application/problem+json, title "An error occurred while processing your request.", traceId 00-359d3bd2a615df3d100b045a95b2cd0e-faa0755bedae84a0-00 | stack trace, SQL, шлях до файлів, версії пакетів, connection string |
+| Журнал API | fail: Microsoft.AspNetCore.Diagnostics.ExceptionHandlerMiddleware[1], TraceId:359d3bd2a615df3d100b045a95b2cd0e, RequestPath:/api/auth/login, причина Npgsql "Failed to connect to 127.0.0.1:54399" | пароль, cookie, connection string |
+
+Середній сегмент traceId у відповіді (359d3bd2a615df3d100b045a95b2cd0e) дорівнює TraceId у журналі, тобто відповідь і внутрішню діагностику можна зіставити без розкриття деталей клієнту.
+
+Відновлення: API зупинено, тимчасові змінні Production прибрано, запуск у Development з правильним connection string; /health -> ready, вхід alice -> 204, GET /api/incidents -> 200 зі списком її інцидентів.
+
+Обмеження: захищені маршрути в Production через HTTP не перевіряються браузером, бо cookie має Secure (SecurePolicy.Always). Очікувані 400/404 для автентифікованого користувача в Production перевіряються в тестовому host з UseEnvironment("Production") (додається в тестах ЛР 6).
 ## 5. Findings summary
 Таблиця: ID / актив / вплив / ймовірність / пріоритет / статус / ID повторної перевірки.
 ## 6. Detailed findings
