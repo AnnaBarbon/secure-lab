@@ -81,19 +81,27 @@ app.UseStatusCodePages();
 var csp = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; "
     + "connect-src 'self'; frame-ancestors 'none'";
 
+// ЛР 6 (F-01): заголовки ставляться в OnStarting, а не до next(). ExceptionHandlerMiddleware
+// очищає вже встановлені заголовки перед записом 500, а callback OnStarting виконується
+// безпосередньо перед надсиланням будь-якої відповіді, зокрема відповіді обробника помилок.
 app.Use(async (context, next) =>
 {
-    context.Response.Headers.XContentTypeOptions = "nosniff";
-    context.Response.Headers["Referrer-Policy"] = "no-referrer";
-
     var isDevelopmentApiReference =
         app.Environment.IsDevelopment()
         && context.Request.Path.StartsWithSegments("/scalar");
 
-    if (!isDevelopmentApiReference)
+    context.Response.OnStarting(() =>
     {
-        context.Response.Headers["Content-Security-Policy"] = csp;
-    }
+        context.Response.Headers.XContentTypeOptions = "nosniff";
+        context.Response.Headers["Referrer-Policy"] = "no-referrer";
+
+        if (!isDevelopmentApiReference)
+        {
+            context.Response.Headers["Content-Security-Policy"] = csp;
+        }
+
+        return Task.CompletedTask;
+    });
 
     await next(context);
 });
