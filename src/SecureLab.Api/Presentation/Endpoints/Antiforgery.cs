@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Antiforgery;
+using Microsoft.AspNetCore.Cors;
 
 namespace SecureLab.Api.Presentation.Endpoints;
 
@@ -18,7 +19,11 @@ public static class AntiforgeryEndpoints
             return Results.Ok(new { token = tokens.RequestToken });
         })
         .WithName("GetCsrfToken")
-        .RequireAuthorization();
+        .RequireAuthorization()
+        // F-03: токен читає лише власний same-origin клієнт. Маршрут виключено з CORS, тому
+        // дозволений Development origin (localhost:4173) не отримує Access-Control-Allow-Origin
+        // і не може прочитати request token.
+        .WithMetadata(new DisableCorsAttribute());
 
         return endpoints;
     }

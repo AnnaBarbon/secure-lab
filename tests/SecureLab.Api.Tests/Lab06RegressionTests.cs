@@ -252,6 +252,28 @@ public sealed class Lab06RegressionTests(SecureLabApiFactory factory)
         Assert.DoesNotContain(results!, item =>
             item!["id"]!.GetValue<string>() == SecureLab.Api.Data.DbSeeder.BobIncidentId.ToString());
     }
+
+    // REG-CORS-02 (F-03): маршрут видачі antiforgery-токена не підпадає під Development CORS:
+    // дозволений origin не отримує Access-Control-Allow-Origin і не може прочитати токен.
+    // Інші GET-маршрути для дозволеного origin не змінились.
+    [Fact]
+    public async Task REG_CORS_02_CsrfTokenRoute_IsNotReadableFromAllowedCorsOrigin()
+    {
+        using var alice = await factory.LoginAsync("alice", StudyPassword);
+
+        using var tokenRequest = new HttpRequestMessage(HttpMethod.Get, "/api/auth/csrf-token");
+        tokenRequest.Headers.Add("Origin", "http://localhost:4173");
+        using var tokenResponse = await alice.SendAsync(tokenRequest);
+        Assert.Equal(HttpStatusCode.OK, tokenResponse.StatusCode);
+        Assert.False(tokenResponse.Headers.Contains("Access-Control-Allow-Origin"));
+        Assert.False(tokenResponse.Headers.Contains("Access-Control-Allow-Credentials"));
+
+        using var listRequest = new HttpRequestMessage(HttpMethod.Get, "/api/incidents");
+        listRequest.Headers.Add("Origin", "http://localhost:4173");
+        using var listResponse = await alice.SendAsync(listRequest);
+        Assert.Equal("http://localhost:4173",
+            listResponse.Headers.GetValues("Access-Control-Allow-Origin").Single());
+    }
     
     private static object NewIncident(string title) => new
     {
