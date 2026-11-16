@@ -80,40 +80,51 @@ public static class Lab06DataProtection
     }
 }
 
-// Кожні 2 с перевіряє спільну теку. Якщо з'явився новіший запис "відкликати всі ключі"
-// (key id="*"), повторює його через локальний IKeyManager: це скидає кеш кільця ключів
-// у цьому екземплярі. Повторний запис має ту саму дату, тому інші екземпляри його не
-// обробляють удруге (без нескінченного циклу). Вміст ключів не читається й не логуються.
+// Кожні 2 с перевіряє спільну теку. Якщо з'явився новіший запис runbook "відкликати всі ключі"
+// (key id="*"), повторює відкликання через локальний IKeyManager: це скидає кеш кільця ключів
+// у цьому екземплярі. Ім'я файлу відкликання ASP.NET Core будує з його дати, тому локальний запис
+// має дату, зсунуту на кілька тіків (залежно від id процесу), і позначку SyncReason. Записи з
+// SyncReason інші екземпляри ігнорують, тож циклу немає. Помилки логуються й не зупиняють host.
+// Вміст ключів не читається й не логуються.
 public sealed class DataProtectionRevocationWatcher(
     string keysPath,
     IKeyManager keyManager,
     ILogger<DataProtectionRevocationWatcher> logger) : BackgroundService
 {
+    private const string SyncReason = "lab6: revocation sync";
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var handled = LatestRevokeAllDate() ?? DateTimeOffset.MinValue;
+        var handled = LatestRunbookRevocationDate() ?? DateTimeOffset.MinValue;
         using var timer = new PeriodicTimer(PollInterval);
 
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
-            var latest = LatestRevokeAllDate();
-            if (latest is not { } revocationDate || revocationDate <= handled)
+            try
             {
-                continue;
-            }
+                var latest = LatestRunbookRevocationDate();
+                if (latest is not { } revocationDate || revocationDate <= handled)
+                {
+                    continue;
+                }
 
-            handled = revocationDate;
-            keyManager.RevokeAllKeys(revocationDate, "lab6: revocation sync");
-            logger.LogWarning(
-                "Data Protection revocation applied: revocationDate={RevocationDate:O} delayMs={DelayMs:F0}",
-                revocationDate,
-                (DateTimeOffset.UtcNow - revocationDate).TotalMilliseconds);
+                handled = revocationDate;
+                var localDate = revocationDate.AddTicks(1 + Environment.ProcessId % 9973);
+                keyManager.RevokeAllKeys(localDate, SyncReason);
+                logger.LogWarning(
+                    "Data Protection revocation applied: revocationDate={RevocationDate:O} delayMs={DelayMs:F0}",
+                    revocationDate,
+                    (DateTimeOffset.UtcNow - revocationDate).TotalMilliseconds);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                logger.LogError("Data Protection revocation sync failed: {ErrorType}", exception.GetType().Name);
+            }
         }
     }
 
-    private DateTimeOffset? LatestRevokeAllDate()
+    private DateTimeOffset? LatestRunbookRevocationDate()
     {
         if (!Directory.Exists(keysPath))
         {
@@ -126,7 +137,8 @@ public sealed class DataProtectionRevocationWatcher(
             try
             {
                 var root = XElement.Load(file);
-                if ((string?)root.Element("key")?.Attribute("id") != "*")
+                if ((string?)root.Element("key")?.Attribute("id") != "*"
+                    || (string?)root.Element("reason") == SyncReason)
                 {
                     continue;
                 }
