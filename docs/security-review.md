@@ -153,6 +153,35 @@ REG-CSRF-02: для POST /api/incidents, PUT, DELETE, POST triage (morgan) і PO
 ### 8.4. HTTPS і HSTS (етап 2, п. 6)
 
 Properties/launchSettings.json має лише профіль http з applicationUrl http://localhost:5080. У Program.cs немає UseHttpsRedirection() і UseHsts(). Reverse proxy або іншої межі TLS у проєкті немає. Отже, HTTPS (шифрування з'єднання), redirect (перенаправлення HTTP на HTTPS) і HSTS (браузер запам'ятовує, що хост доступний лише через HTTPS) у цьому стенді не реалізовані й не перевірялися. Відсутність заголовка Strict-Transport-Security на localhost не є дефектом: HSTS за замовчуванням не надсилається для loopback (ExcludedHosts: localhost, 127.0.0.1, [::1]), і змінювати це виключення заради демонстрації не потрібно. Локальний HTTP-профіль не доводить безпеки транспорту в production; реальний deployment, TLS termination і HSTS на production host не тестувалися (residual risk). Auth cookie поза Development має SecurePolicy.Always, тому в production працюватиме лише через HTTPS.
+
+### 8.5. Rate limiting (етап 2, п. 7)
+
+| Параметр | Login (ЛР 3, повторна перевірка) | Search (ЛР 6) |
+|---|---|---|
+| Маршрут | POST /api/auth/login | GET /api/incidents/search?q=&sortBy= |
+| Partition key | IP-адреса з'єднання (RemoteIpAddress) | id автентифікованого користувача (claim NameIdentifier з cookie) |
+| Quota / window | 5 за 60 с (LoginRateLimit:*) | 20 за 60 с (SearchRateLimit:*) |
+| Алгоритм | fixed window, QueueLimit 0 | fixed window, QueueLimit 0 |
+| Відмова | 429 | 429 |
+| Місце в конвеєрі | UseRateLimiter після UseAuthentication і UseAuthorization | те саме: анонім отримує 401 до лічильника |
+
+Чому такий ключ для search: пошук доступний лише автентифікованому користувачу, тому перевірена identity вже є. IP спільний для користувачів за NAT і дав би одному змогу вичерпати quota іншого; довільний заголовок клієнта не є перевіреною identity. Login не має автентифікованого користувача, тому там лишається IP (компроміс задокументовано в ЛР 3).
+
+Перевірка за планом методики:
+
+| Пункт | Login | Search |
+|---|---|---|
+| 1. У межах limit поведінка не ламається | LoginRateLimitTests: 3 невдалі спроби дають 401 | REG-RL-01: 3 запити 200; браузер: 20 запитів 200 |
+| 2. Наступна спроба дає 429 | 429 і для правильного пароля, і для невідомого користувача | REG-RL-01: 4-й запит 429; браузер alice: 21-й і 22-й запит 429 |
+| 3. Відновлення після вікна | після 4 с + 0,7 с вхід 204 | REG-RL-01: після 4 с + 0,7 с 200; браузер: alice через хвилину 200 |
+| 4. Відповідь не розкриває існування акаунта | однаковий 429 для alice і невідомого імені, без Set-Cookie | 429 не залежить від q і вмісту |
+| 5. Authorization окремо | обмеження не дає доступу до чужих даних | після відновлення результат alice не містить інциденту Bob; анонім 401, а не 429 |
+| Два partitions | окремий test host має власні лічильники (Quota_BelongsToHost_NotToHttpClient) | REG-RL-01 і браузер: після вичерпання quota alice пошук bob дає 200 |
+
+Ручна перевірка: Development, Chrome; alice (звичайне вікно) і bob (вікно інкогніто), Console fetch("/api/incidents/search?q=a").
+
+Межа: limiter in-memory, його стан не спільний між кількома екземплярами API і обнуляється після перезапуску. Для одного локального екземпляра цього достатньо; для кількох екземплярів потрібне спільне сховище (residual risk).
+
 ## 9. Dependency and secret audit
 ### 9.1. Секрети й конфігурація (етап 1, п. 3)
 

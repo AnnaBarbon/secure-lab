@@ -6,6 +6,7 @@ using Scalar.AspNetCore;
 using SecureLab.Api.Application.Incidents;
 using SecureLab.Api.Data;
 using SecureLab.Api.Presentation.Endpoints;
+using System.Security.Claims;
 
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
@@ -52,6 +53,25 @@ builder.Services.AddRateLimiter(options =>
             {
                 PermitLimit = configuration.GetValue("LoginRateLimit:PermitLimit", 5),
                 Window = TimeSpan.FromSeconds(configuration.GetValue("LoginRateLimit:WindowSeconds", 60)),
+                QueueLimit = 0
+            });
+    });
+    
+    // ЛР 6: обмеження пошуку. Ключ групи — id автентифікованого користувача з cookie
+    // (NameIdentifier): у кожного користувача власний лічильник; IP не використовується, бо він
+    // спільний за NAT, а довільний заголовок клієнта не є перевіреною identity.
+    // UseRateLimiter стоїть після UseAuthentication/UseAuthorization, тому анонім отримує 401
+    // ще до лічильника. За замовчуванням 20 запитів за 60 с.
+    options.AddPolicy("search", httpContext =>
+    {
+        var configuration = httpContext.RequestServices.GetRequiredService<IConfiguration>();
+        var userId = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "anonymous";
+        return RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: "search:" + userId,
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = configuration.GetValue("SearchRateLimit:PermitLimit", 20),
+                Window = TimeSpan.FromSeconds(configuration.GetValue("SearchRateLimit:WindowSeconds", 60)),
                 QueueLimit = 0
             });
     });

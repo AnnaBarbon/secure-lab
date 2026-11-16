@@ -67,7 +67,7 @@ public static class Lab02Endpoints
                 row.Status.ToString(),
                 row.CreatedAtUtc
             )));
-        }).RequireAuthorization();
+        }).RequireAuthorization().RequireRateLimiting("search");
         // ЛР 03: створення вимагає автентифікації (.RequireAuthorization() нижче).
         app.MapPost("/api/incidents", async (CreateIncidentRequest request, HttpContext httpContext,
             SecureLabDbContext db, CancellationToken ct) =>

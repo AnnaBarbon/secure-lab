@@ -3,6 +3,8 @@ using System.Net.Http.Json;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Hosting;
 using SecureLab.Api.Presentation.Endpoints;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 
 namespace SecureLab.Api.Tests;
 
@@ -200,6 +202,57 @@ public sealed class Lab06RegressionTests(SecureLabApiFactory factory)
         }
     }
 
+        // REG-RL-01: пошук обмежено окремо для кожного користувача. Свіжий host із малими
+    // значеннями (3 запити за 4 с): у межах quota 200, далі 429; інший користувач (інший
+    // partition) не заблокований; анонім отримує 401, а не 429; після вікна пошук знову працює;
+    // authorization не змінюється (Alice не бачить інцидент Bob).
+    [Fact]
+    public async Task REG_RL_01_Search_IsLimitedPerUser_AndRecoversAfterWindow()
+    {
+        using var host = factory.WithWebHostBuilder(builder =>
+            builder.ConfigureAppConfiguration((_, configuration) =>
+                configuration.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["SearchRateLimit:PermitLimit"] = "3",
+                    ["SearchRateLimit:WindowSeconds"] = "4"
+                })));
+        using var alice = await host.LoginAsync("alice", StudyPassword);
+        using var bob = await host.LoginAsync("bob", StudyPassword);
+        using var anonymous = host.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false
+        });
+
+        for (var i = 0; i < 3; i++)
+        {
+            using var allowed = await alice.GetAsync("/api/incidents/search?q=a");
+            Assert.Equal(HttpStatusCode.OK, allowed.StatusCode);
+        }
+
+        using var limited = await alice.GetAsync("/api/incidents/search?q=a");
+        Assert.Equal(HttpStatusCode.TooManyRequests, limited.StatusCode);
+
+        // Інший partition: Bob має власний лічильник.
+        using var bobSearch = await bob.GetAsync("/api/incidents/search?q=a");
+        Assert.Equal(HttpStatusCode.OK, bobSearch.StatusCode);
+
+        // Анонім зупиняється на authorization (401), до лічильника.
+        using var anonymousSearch = await anonymous.GetAsync("/api/incidents/search?q=a");
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymousSearch.StatusCode);
+
+        // Ліміт стосується лише пошуку: список Alice працює.
+        using var list = await alice.GetAsync("/api/incidents");
+        Assert.Equal(HttpStatusCode.OK, list.StatusCode);
+
+        // Відновлення після вікна; authorization не змінилась.
+        await Task.Delay(TimeSpan.FromSeconds(4) + TimeSpan.FromMilliseconds(700));
+        using var recovered = await alice.GetAsync("/api/incidents/search?q=");
+        Assert.Equal(HttpStatusCode.OK, recovered.StatusCode);
+        var results = await recovered.Content.ReadFromJsonAsync<JsonArray>();
+        Assert.DoesNotContain(results!, item =>
+            item!["id"]!.GetValue<string>() == SecureLab.Api.Data.DbSeeder.BobIncidentId.ToString());
+    }
+    
     private static object NewIncident(string title) => new
     {
         title,

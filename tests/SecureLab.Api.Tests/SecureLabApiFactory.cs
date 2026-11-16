@@ -18,7 +18,9 @@ public sealed class SecureLabApiFactory : WebApplicationFactory<Program>
             configuration.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["LoginRateLimit:PermitLimit"] = "1000",
-                ["LoginRateLimit:WindowSeconds"] = "60"
+                ["LoginRateLimit:WindowSeconds"] = "60",
+                ["SearchRateLimit:PermitLimit"] = "1000",
+                ["SearchRateLimit:WindowSeconds"] = "60"
             }));
     }
 }
