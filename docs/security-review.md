@@ -66,9 +66,42 @@
 ## 7. Regression results
 Для всіх: мінімальний pack SQLi/authentication/authorization-IDOR/XSS/CSRF. Добрий/відмінний: ще validation/CORS/rate limiting. Відмінний: автоматизований повний REG-CSRF-01 (login/cookie → відмова → незмінний стан → token → успіх → змінений стан), команда й фактичний результат. Початкові ID сценаріїв (T/S/A/E/R/REG), команда або тест, передумова, точний результат, перевірка стану ресурсу, перевірений фінальний commit.
 ## 8. Hardening controls
-Для всіх: наявні controls; наявний login limiter — повторна перевірка (quota, 429, відновлення), відсутній — gap або виключення з причиною. Добрий/відмінний: наявні headers, CORS, search limiter (два partitions, quota, 429, відновлення). CSP, якої не було, — N/A на достатньому/доброму; для відмінного вона обов’язкова й не має ламати client. Добрий/відмінний: змістові відмінності Development/Production. Відмінний: погодження advanced variant до реалізації й фактична перевірка; Redis — shared state, TTL, partition isolation, failure mode.
+### 8.1. Заголовки відповідей (етап 2, п. 1)
 
-Зв’язок «control → ризик → фактична перевірка → межа»; у рядках про headers зазначте профіль, клієнт і status.
+Заголовки ставить middleware у Program.cs через Response.OnStarting (після виправлення F-01). Значення CSP: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'.
+
+| Клас | Profile і client | Method + route | Status | Фактичні значення | Ризик | Межа |
+|---|---|---|---|---|---|---|
+| Статична сторінка | Development, curl.exe, анонімно | GET / | 200 text/html | nosniff; no-referrer; CSP | MIME sniffing, витік referrer, вбудовування сторінки | не замінює правильний Content-Type і заборону секретів в URL |
+| Успішний API | Development, Chrome, сеанс alice | GET /api/incidents/20000000-0000-0000-0000-000000000001 | 200 application/json | nosniff; no-referrer; CSP | те саме | не замінює authorization |
+| Validation | Development, Chrome, сеанс alice | GET /api/incidents?status=Unknown | 400 application/problem+json | nosniff; no-referrer; CSP | те саме | не замінює validation |
+| Unknown resource | Development, Chrome, сеанс alice | GET /api/incidents/99999999-9999-9999-9999-999999999999 | 404 application/problem+json | nosniff; no-referrer; CSP | те саме | однаковий 404 для чужого й неіснуючого задає authorization (ЛР 4) |
+| Unexpected error | Production, no-launch-profile, REST Client, анонімно | POST /api/auth/login, БД 54399 | 500 application/problem+json | до виправлення: заголовків немає (F-01); після: nosniff; no-referrer; CSP | заголовки зникали на шляху помилки | REG-HDR-01 |
+
+| Control | Що перевірено | Який ризик зменшує | Чого не замінює |
+|---|---|---|---|
+| Content-Security-Policy | policy відповідає клієнту: лише власні скрипти, стилі, зображення й fetch; flow /, /auth-lab.html, /browser-lab.html працює (ЛР 5) | частину наслідків injection і завантаження сторонніх ресурсів | безпечний DOM, validation, authorization |
+| X-Content-Type-Options: nosniff | присутній на 200, 400, 404, 500 і статиці | MIME sniffing у браузері | правильний Content-Type на сервері |
+| Referrer-Policy: no-referrer | присутній на всіх класах | витік referrer | заборону секретів в URL |
+| frame-ancestors 'none' (у CSP) | присутній на всіх класах | clickjacking, вбудовування в чужі сторінки | authorization |
+| CORS | лише Development, origin http://localhost:4173, метод GET, заголовок X-Lab-Cors-Probe, credentials | читання відповіді стороннім JavaScript | authentication, authorization, CSRF-захист |
+| Auth cookie | HttpOnly, SameSite=Lax, Secure поза Development (CookieFlagsTests) | частину ризиків cookie в браузері | XSS, CSRF, серверну authorization |
+
+### 8.2. CORS і профіль cookie (етап 2, п. 2, REG-CORS-01)
+
+Profile: Development (dotnet run --launch-profile http), API http://localhost:5080; probes demonstrations/cors-probe через python -m http.server на 4173 (дозволений) і 4174 (недозволений); Chrome, сеанс alice.
+
+| Сценарій | Origin | Результат |
+|---|---|---|
+| Браузер, GET /api/incidents з credentials | http://localhost:4173 | 200, JavaScript прочитав список; Access-Control-Allow-Origin: http://localhost:4173, Access-Control-Allow-Credentials: true |
+| Браузер, той самий запит | http://localhost:4174 | у Network 200 OK, але без Access-Control-*; JavaScript відповідь не отримав ("Браузер не надав response JavaScript") |
+| curl.exe GET /health | http://localhost:4173 | 200, Access-Control-Allow-Origin: http://localhost:4173, Allow-Credentials: true |
+| curl.exe GET /health | http://localhost:4174 | 200, жодного Access-Control-* |
+| curl.exe OPTIONS /api/incidents, Access-Control-Request-Method: POST | http://localhost:4173 | 204, Access-Control-Allow-Methods: GET; браузер не надішле cross-origin POST |
+
+Автоматично: REG_CORS_01_OnlyAllowedDevelopmentOrigin_GetsCorsHeaders (Lab06RegressionTests).
+
+Інтерпретація. Запит з 4174 у Network має 200 OK: сервер виконав його з cookie, браузер лише не віддав відповідь JavaScript. CORS обмежує читання відповіді, а не виконання запиту, тому не є захистом від CSRF. 4173 і 5080 — це той самий site (localhost), тому cookie з SameSite=Lax надсилається; різні порти localhost не є доказом поведінки SameSite між різними сайтами. Wildcard origin разом з credentials не використовується. У Production CORS policy не реєструється.
 
 | ID | Method + route | Джерело / розбіжність | Яка зміна стану | Cookie authentication | Browser-accessible | Antiforgery validation | Regression ID |
 |---|---|---|---|---|---|---|---|

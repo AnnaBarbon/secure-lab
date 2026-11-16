@@ -39,4 +39,34 @@ public sealed class Lab06RegressionTests(SecureLabApiFactory factory)
         Assert.DoesNotContain("unreachable-study-value", body);
         Assert.DoesNotContain("   at ", body);
     }
+
+    
+    // REG-CORS-01: у Development лише origin http://localhost:4173 отримує CORS-заголовки;
+    // недозволений origin їх не отримує; cross-origin POST через preflight не дозволено.
+    [Fact]
+    public async Task REG_CORS_01_OnlyAllowedDevelopmentOrigin_GetsCorsHeaders()
+    {
+        using var client = factory.CreateClient();
+
+        using var allowedRequest = new HttpRequestMessage(HttpMethod.Get, "/health");
+        allowedRequest.Headers.Add("Origin", "http://localhost:4173");
+        using var allowed = await client.SendAsync(allowedRequest);
+        Assert.Equal(HttpStatusCode.OK, allowed.StatusCode);
+        Assert.Equal("http://localhost:4173",
+            allowed.Headers.GetValues("Access-Control-Allow-Origin").Single());
+        Assert.Equal("true", allowed.Headers.GetValues("Access-Control-Allow-Credentials").Single());
+
+        using var deniedRequest = new HttpRequestMessage(HttpMethod.Get, "/health");
+        deniedRequest.Headers.Add("Origin", "http://localhost:4174");
+        using var denied = await client.SendAsync(deniedRequest);
+        Assert.Equal(HttpStatusCode.OK, denied.StatusCode);
+        Assert.False(denied.Headers.Contains("Access-Control-Allow-Origin"));
+
+        using var preflightRequest = new HttpRequestMessage(HttpMethod.Options, "/api/incidents");
+        preflightRequest.Headers.Add("Origin", "http://localhost:4173");
+        preflightRequest.Headers.Add("Access-Control-Request-Method", "POST");
+        using var preflight = await client.SendAsync(preflightRequest);
+        Assert.Equal("GET", string.Join(",", preflight.Headers.GetValues("Access-Control-Allow-Methods")));
+        Assert.DoesNotContain("POST", string.Join(",", preflight.Headers.GetValues("Access-Control-Allow-Methods")));
+    }
 }
