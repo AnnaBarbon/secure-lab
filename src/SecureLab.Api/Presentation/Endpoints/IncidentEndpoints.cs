@@ -349,10 +349,25 @@ public static class IncidentEndpoints
             Note = note.Length == 0 ? "Первинну оцінку виконано." : note,
             CreatedAtUtc = now
         });
-        await dbContext.SaveChangesAsync(cancellationToken);
+                await dbContext.SaveChangesAsync(cancellationToken);
 
-        return Results.Ok(new IncidentStatusChangedResponse(incident.Id, incident.Status.ToString()));
-    }
+        // ЛР 6: подія аудиту дозволеного привілейованого переходу, у тому самому форматі, що й
+        // authorization.denied: subject з principal, action, resource, result, переходи, час, trace id.
+        // Note, назва й опис інциденту в журнал не пишуться.
+        logger.LogInformation(
+            "audit subject={SubjectId} action={Action} resource={ResourceId} result={Result} "
+            + "from={OldStatus} to={NewStatus} occurredAtUtc={OccurredAtUtc:O} traceId={TraceId}",
+            userId,
+            "incident.triage",
+            incident.Id,
+            "allowed",
+            IncidentStatus.New,
+            IncidentStatus.Triaged,
+            now,
+            Activity.Current?.Id ?? httpContext.TraceIdentifier);
+
+            return Results.Ok(new IncidentStatusChangedResponse(incident.Id, incident.Status.ToString()));
+        }
 
     private static async Task<IResult> GetCommentAsync(
         Guid id,

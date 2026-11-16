@@ -64,6 +64,40 @@
 ## 6. Detailed findings
 Щонайменше одна власна знахідка для достатнього рівня, дві виправлені — для доброго; три виправлені — для відмінного, з них третя поза прямим checklist; кожна в окремому файлі docs/findings/*.md.
 ## 7. Regression results
+### 7.1. Діагностичні журнали й аудит (етап 3, п. 4)
+
+Діагностичний журнал (ILogger, консоль) потрібен оператору для пошуку причини збою за traceId. Журнал аудиту фіксує, хто, яку дію, над яким ресурсом, з яким результатом і коли виконав. Аудит привілейованого переходу Incident.Status має два канали: таблиця incident_status_history (дозволений перехід, з ЛР 4) і подія журналу з однаковим форматом для обох результатів: authorization.denied (ЛР 4) і audit ... result=allowed (додано в ЛР 6, IncidentEndpoints.TriageAsync, після SaveChangesAsync). Note, назва й опис інциденту в подію не потрапляють.
+
+Збір: Development-запуск з дублюванням консолі у файл поза Git (dotnet run ... 2>&1 | Tee-Object -FilePath ..\lr06-logs\api.log), потім Production-запуск з недоступною БД, дописаний у той самий файл (-Append). Chrome: alice (звичайне вікно) і morgan (інкогніто). Після перевірки файл видалено.
+
+| Сценарій | Що зроблено | Що є в журналі / відповіді |
+|---|---|---|
+| Successful login | alice, правильний пароль, Login: 204 | Auth event login: result succeeded, user <id>, trace <id> |
+| Failed login | alice, вигаданий пароль NotARealPassword1!, Login: 401 | Auth event login: result failed, user anonymous, trace <id>; ім'я користувача й пароль не записано |
+| Denied protected action | alice (Reporter) POST /api/incidents/7115ef08-.../triage: 403 | authorization.denied subject=10000000-...-0001 action=incident.triage resource=7115ef08-... result=denied occurredAtUtc=2026-11-16T12:43:02Z traceId=00-2a1030bb... |
+| Validation error | GET /api/incidents?status=Unknown: 400 | відповідь Validation Problem Details; у журналі запису немає, введене значення Unknown не записано |
+| Unexpected server error | Production, БД 54399, POST /api/auth/login: 500, traceId 00-634da2d2f424b80943ee35143030a8c2-742eb9d8fc3a2dce-00 | ExceptionHandlerMiddleware з TraceId:634da2d2f424b80943ee35143030a8c2; причина Npgsql без пароля й connection string |
+| Privileged transition | morgan (Analyst) POST .../triage: 200, Triaged | audit subject=10000000-...-0003 action=incident.triage resource=7115ef08-... result=allowed from=New to=Triaged occurredAtUtc=2026-11-16T12:44:13Z traceId=00-c9837687...; у БД incident_status_history: New -> Triaged, changed_by_user_id ...0003, created_at_utc 2026-11-16 12:44:13 |
+
+Пошук чутливих даних у ..\lr06-logs\api.log (Select-String; пароль береться зі змінної середовища, у команду не вписується):
+
+| Що шукали | Збігів |
+|---|---|
+| навчальний пароль ($env:SeedUsers__Password) | 0 |
+| NotARealPassword1! | 0 |
+| cookie: / set-cookie | 0 |
+| X-CSRF-TOKEN | 0 |
+| CfDJ8 (початок значень, захищених Data Protection: cookie сесії, antiforgery-токен) | 0 |
+| local-study-password / unreachable-study-value (паролі БД) | 0 |
+| значення Unknown з запиту валідації | 0 |
+| Позитивний контроль: Auth event login | 6 |
+| Позитивний контроль: authorization.denied | 1 |
+| Позитивний контроль: result=allowed | 1 |
+| Позитивний контроль: ExceptionHandlerMiddleware | 2 |
+| Позитивний контроль: trace 634da2d2f424b80943ee35143030a8c2 | > 0 |
+
+Параметри SQL у журналі EF Core показано як '?' (sensitive data logging вимкнено). Повідомлення будуються structured logging з шаблонами, а не конкатенацією введення користувача, тому керівні символи в тексті не змінюють структуру запису (log injection). Межа висновку: лише ці шість сценаріїв і консольний sink одного запуску; інші sinks і маршрути не переглядалися.
+
 Для всіх: мінімальний pack SQLi/authentication/authorization-IDOR/XSS/CSRF. Добрий/відмінний: ще validation/CORS/rate limiting. Відмінний: автоматизований повний REG-CSRF-01 (login/cookie → відмова → незмінний стан → token → успіх → змінений стан), команда й фактичний результат. Початкові ID сценаріїв (T/S/A/E/R/REG), команда або тест, передумова, точний результат, перевірка стану ресурсу, перевірений фінальний commit.
 ## 8. Hardening controls
 ### 8.1. Заголовки відповідей (етап 2, п. 1)
