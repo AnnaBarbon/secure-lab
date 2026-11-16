@@ -98,7 +98,26 @@
 
 Параметри SQL у журналі EF Core показано як '?' (sensitive data logging вимкнено). Повідомлення будуються structured logging з шаблонами, а не конкатенацією введення користувача, тому керівні символи в тексті не змінюють структуру запису (log injection). Межа висновку: лише ці шість сценаріїв і консольний sink одного запуску; інші sinks і маршрути не переглядалися.
 
-Для всіх: мінімальний pack SQLi/authentication/authorization-IDOR/XSS/CSRF. Добрий/відмінний: ще validation/CORS/rate limiting. Відмінний: автоматизований повний REG-CSRF-01 (login/cookie → відмова → незмінний стан → token → успіх → змінений стан), команда й фактичний результат. Початкові ID сценаріїв (T/S/A/E/R/REG), команда або тест, передумова, точний результат, перевірка стану ресурсу, перевірений фінальний commit.
+### 7.2. Regression pack (етап 3, п. 5)
+
+Known state: dotnet run --project src/SecureLab.Api -- --reset-database (Development), потім dotnet test SecureLab.sln -c Release (16.11.2026): 61 з 61. Сценарії ЛР 2-5 лишаються під своїми ID; нові REG-* надано лише сценаріям ЛР 6.
+
+| Рівень | ID сценарію | Property | Передумови | Негативний сценарій | Позитивна перевірка | Evidence / command | Result |
+|---|---|---|---|---|---|---|---|
+| добрий | T-02, T-05, T-10 (Lab02CustomTests) | server validation | reset, login alice, чинний токен | порожній title і невідома severity; невідомий sortBy; надто старий occurredAtUtc -> 400 | T-01: допустиме введення -> 201 | dotnet test, тести T02_*, T05_*, T10_*, T01_* | pass |
+| достатній | S-02, T-04 (Lab02CustomTests) | query не змінює структуру SQL | seed | S-02: read-only SQLi у q -> порожній результат | T-04: пошук з апострофами -> 200 і очікувані записи | S02_RetestSqlInjection_ReturnsEmpty_AndPositiveControlPasses, T04_Search_WithApostrophes_Returns200AndExpectedEntities | pass |
+| достатній | A-01, A-02, A-06, A-07 (Lab03SecurityTests) | identity lifecycle | навчальні акаунти | анонімне створення -> 401; невідомий користувач і хибний пароль однакові; після logout -> 401 | login -> /api/me повертає alice; logout 204 | A01_AnonymousCreate_*, A02_LoginThenMe_*, A06_LogoutThenSameClient_Gets401, A07_UnknownUserAndWrongPassword_LookTheSame | pass |
+| достатній | A-03, A-04, A-06, A-11, A-12 (Lab04AuthorizationTests) | серверна перевірка власника й ролі | seed alice/bob/morgan | чужий інцидент -> 404 без даних; Reporter triage -> 403, статус не змінився; пошук без чужих записів | власник читає й видаляє свій New; Analyst triage -> Triaged | A03_*, A04_*, A06_*, A07_*, A11_*, A12_* | pass |
+| достатній | REG-XSS-01 (ЛР 5) | текст не виконується як код | reset, local marker у seed-коментарі | marker <img onerror> не виконується, data-lab05-marker лишається null | складний текст (лапки, <, >, Unicode, <b>, 3900 символів) відображається дослівно | tests/browser/browser-lab-dom.js у Console browser-lab.html; ClientScript_DoesNotUseDangerousInnerHtmlSink | pass |
+| добрий | REG-CORS-01 | точний scope browser origin | два development origins 4173/4174 | origin 4174 -> без Access-Control-*; preflight POST -> дозволено лише GET | origin 4173 -> Access-Control-Allow-Origin і Allow-Credentials | REG_CORS_01_OnlyAllowedDevelopmentOrigin_GetsCorsHeaders; ручні probes (розділ 8.2) | pass |
+| достатній | REG-CSRF-01 | потрібна пара antiforgery-токенів | cookie alice, власний інцидент | без токена, з невалідним і з токеном bob -> 400, title не змінився | валідний токен alice -> 200, title змінився | REG_CSRF_01_Update_RequiresValidAntiforgeryToken_AndKeepsStateOnRejection | pass |
+| відмінний | REG-CSRF-02 | токен на всьому cookie-периметрі | cookie alice і morgan | create, update, delete, triage, logout без токена -> 400, стан не змінився | ручна перевірка клієнта (розділ 8.3) | REG_CSRF_02_AllCookieMutations_WithoutToken_Return400_AndKeepState | pass |
+| добрий | Login rate limit (ЛР 3) | abuse flow обмежено | quota 3/4 с у свіжому host | спроба понад quota -> 429, однаково для відомого й невідомого імені | після вікна -> 204; окремий host має власний лічильник | Login_AfterLimit_Returns429ForAnyAccount_ThenRecoversAfterWindow, Quota_BelongsToHost_NotToHttpClient | pass |
+| добрий | REG-RL-01 | пошук обмежено для кожного користувача | quota 3/4 с у свіжому host | 4-й запит alice -> 429; анонім -> 401 | bob 200 (інший partition); після вікна alice 200 без чужих записів | REG_RL_01_Search_IsLimitedPerUser_AndRecoversAfterWindow; ручна перевірка (розділ 8.5) | pass |
+| відмінний | REG-HDR-01 (F-01) | заголовки безпеки на шляху помилки | Production test host, БД 54399 | до виправлення 500 без заголовків | після виправлення 500 з nosniff, no-referrer, CSP без внутрішніх деталей | REG_HDR_01_Unexpected500_KeepsSecurityHeaders_WithoutInternalDetails | pass |
+
+Повний REG-CSRF-01 автоматизовано: реальний login, cookie сесії й антифорджері-cookie в одному HttpClient (HandleCookies = true), токен отримується тим самим клієнтом з GET /api/auth/csrf-token, стан перевіряється повторним GET.
+
 ## 8. Hardening controls
 ### 8.1. Заголовки відповідей (етап 2, п. 1)
 
