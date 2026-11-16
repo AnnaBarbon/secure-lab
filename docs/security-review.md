@@ -275,8 +275,16 @@ Properties/launchSettings.json має лише профіль http з applicatio
 Чому видалення з поточного файла недостатньо: якщо реальний credential колись потрапив у Git, він лишається в історії комітів, у всіх клонах і fork, у кеші CI та в журналах. Видалення з поточного файла прибирає лише останню версію. Тому витеклий credential треба вважати скомпрометованим: відкликати або замінити (rotation) у самій системі (новий пароль БД, новий ключ), перевірити журнали на використання старого значення і лише після цього прибрати його з поточного стану. Переписувати історію Git без окремої інструкції не потрібно.
 
 ### 9.2. Залежності
+Команди (16.11.2026, .NET SDK 10.0.302, global.json rollForward latestPatch): dotnet restore -> Restore complete, код 0, попереджень NU1901-NU1904 немає; dotnet package list --vulnerable --include-transitive -> код 0, джерело https://api.nuget.org/v3/index.json, "The given project SecureLab.Api has no vulnerable packages given the current sources", те саме для SecureLab.Api.Tests.
 
-Заповнюється на етапі 3.
+| Package | Version | Direct / transitive | Advisory / severity | Чи використовується relevant functionality | Доступне оновлення | Рішення і причина |
+|---|---|---|---|---|---|---|
+| (немає збігів) | версії з packages.lock.json | direct і transitive | джерело не повідомило про відомі advisories | не застосовно | не встановлювалось | дія не потрібна; NuGetAuditSuppress і WarningsNotAsErrors для NU190x не додавались |
+
+Межа висновку: лише відомі на 16.11.2026 advisories джерела api.nuget.org для версій, зафіксованих у packages.lock.json обох проєктів. Досяжність коду, невідомі вразливості та пакети поза lock-файлами не оцінювались. Код 0 сам по собі не є доказом: висновок зроблено з тексту виводу для кожного проєкту. Нових пакетів у ЛР 6 не додавалось (antiforgery і rate limiting входять до ASP.NET Core).
+
+Систематичний пошук у Git на commit 9dcb491: git status --short порожній; git ls-files -> 92 відстежувані файли; git grep -n -I -i -E 'password|passwd|secret|api.?key|token|connectionstring' -- . -> 351 збіг; нові відносно етапу 1 збіги (слово token) — назви заголовка X-CSRF-TOKEN, маршрут /api/auth/csrf-token, змінні й коментарі в Antiforgery.cs, csrf.js і тестах; значень токенів немає. Межа: поточні tracked files; history, stash, інші клони й зовнішні CI не перевірялися, крім історії appsettings.Development.json (розділ 9.1).
+
 ## 10. Residual risks
 Неперевірені й тимчасово прийняті ризики, відповідальний і наступна дія.
 ## 11. Conclusion
