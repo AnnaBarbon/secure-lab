@@ -3,9 +3,9 @@
 Рівень: відмінний ("Відмінно"); рівні накопичувальні, тому виконуються також усі вимоги достатнього й доброго рівнів. Commit початку огляду (review-start): 7bac4abbee19438b41e97919a02e9792aa6f0900 (гілка main, після тегу v0.5.0 = 1832f52). Хеші прийнятого commit і тегу v1.0.0 додаються наприкінці. Дата початку: 15.11.2026. .NET SDK 10.0.302 (global.json, rollForward latestPatch). Профілі: http (Development, http://localhost:5080) і production-like (ASPNETCORE_ENVIRONMENT=Production). Клієнти: Chrome, VS Code REST Client, PowerShell (curl.exe), xUnit (dotnet test).
 
 ## 1. Executive summary
-Один абзац: що перевірено, скільки знахідок зафіксовано й виправлено, результат фактичного фінального прогону, головні залишкові ризики.
+Огляд безпеки SecureLab після ЛР 5 (review-start 7bac4ab, main) на рівні "Відмінно". Перевірено: межі довіри й секрети в Git, production-like профіль і безпечну помилку 500, заголовки браузера, CORS, CSRF на всьому периметрі змінювальних маршрутів, rate limiting входу й пошуку, залежності, журнали й аудит, а також погоджений advanced variant: явне керування ключами ASP.NET Core Data Protection для кількох екземплярів API. Зафіксовано й виправлено три власні знахідки: F-02 (P2) CSRF на logout зі сторінки того самого site, F-03 (P3) читання antiforgery-токена через Development CORS, F-01 (P3) зникнення захисних заголовків на 500. В advanced variant тестами знайдено й виправлено два дефекти власного механізму синхронізації відкликань. Фінальний прогін: dotnet test SecureLab.sln -c Release — 67 з 67; dotnet package list --vulnerable — вразливих пакетів не знайдено. Головні залишкові ризики: login CSRF, відсутність перевіреного HTTPS/HSTS на production host, in-memory rate limiter для одного екземпляра.
 ## 2. Scope та exclusions
-Поточні відстежувані Git файли — обов’язково. Історія Git: лише фактично переглянуті файли, refs або проміжок дат; інакше напишіть «не перевірено».
+У межах: поточні відстежувані файли репозиторію на main; API, браузерний клієнт, конфігурація, журнали; локальна PostgreSQL у Docker; два локальні екземпляри API (5080 і 5081) для advanced variant. Історія Git переглянута лише для src/SecureLab.Api/appsettings.Development.json (розділ 9.1). Модель загроз і межі довіри: docs/threat-model.md. Поза межами: зовнішній penetration test, production host, TLS termination і HSTS, інші клони, fork, stash, зовнішній CI, мережеві сховища ключів і контейнери. Тимчасові теки ..\lr06-dp, ..\lr06-logs і сертифікат dp-cert.pfx лежать поза репозиторієм.
 ## 3. System overview і trust boundaries
 Компоненти, межі довіри та очікувані властивості на межах наведено в docs/threat-model.md. Кожна межа пов'язана з конкретним test або перевіркою.
 
@@ -131,6 +131,12 @@ Known state: dotnet run --project src/SecureLab.Api -- --reset-database (Develop
 | добрий | Login rate limit (ЛР 3) | abuse flow обмежено | quota 3/4 с у свіжому host | спроба понад quota -> 429, однаково для відомого й невідомого імені | після вікна -> 204; окремий host має власний лічильник | Login_AfterLimit_Returns429ForAnyAccount_ThenRecoversAfterWindow, Quota_BelongsToHost_NotToHttpClient | pass |
 | добрий | REG-RL-01 | пошук обмежено для кожного користувача | quota 3/4 с у свіжому host | 4-й запит alice -> 429; анонім -> 401 | bob 200 (інший partition); після вікна alice 200 без чужих записів | REG_RL_01_Search_IsLimitedPerUser_AndRecoversAfterWindow; ручна перевірка (розділ 8.5) | pass |
 | відмінний | REG-HDR-01 (F-01) | заголовки безпеки на шляху помилки | Production test host, БД 54399 | до виправлення 500 без заголовків | після виправлення 500 з nosniff, no-referrer, CSP без внутрішніх деталей | REG_HDR_01_Unexpected500_KeepsSecurityHeaders_WithoutInternalDetails | pass |
+| відмінний | REG-CORS-02 (F-03) | маршрут токена не читається через CORS | сеанс alice, Origin http://localhost:4173 | GET /api/auth/csrf-token -> без Access-Control-Allow-Origin | GET /api/incidents для 4173 -> Access-Control-Allow-Origin лишився | REG_CORS_02_CsrfTokenRoute_IsNotReadableFromAllowedCorsOrigin | pass |
+| відмінний | REG-DP-01 | спільне кільце ключів | два test host зі спільною текою, третій з окремою | окрема тека -> 401 | інший екземпляр і екземпляр після перезапуску -> 200 | REG_DP_01_SharedKeyRing_AcceptsCookieAcrossInstances_AndAfterRestart | pass |
+| відмінний | REG-DP-02 | ключі зашифровані сертифікатом | тестовий самопідписаний pfx у тимчасовій теці | копія теки без сертифіката -> 401 | у файлах є EncryptedData, немає <masterKey; із сертифікатом -> 200 | REG_DP_02_CertificateEncryptsKeys_CopyWithoutCertificateRejectsCookie | pass |
+| відмінний | REG-DP-03 | відкликання доходить до всіх екземплярів | два host з watcher, відкликання з третього | старий cookie -> 401 на обох менш ніж за 10 с | новий вхід приймають обидва | REG_DP_03_RevocationReachesBothInstances_WithWatcher | pass |
+| відмінний | REG-DP-04 | поведінка без watcher зафіксована | host без watcher | після відкликання з іншого процесу старий cookie ще приймається | після перезапуску -> 401 | REG_DP_04_WithoutWatcher_RevocationAppliesOnlyAfterRestart | pass |
+| відмінний | REG-DP-05 | пошкоджений ключ не дає 500 | файли key-*.xml замінено на некоректний XML | старий cookie -> 401 | /health -> 200 | REG_DP_05_CorruptedKeyFile_Returns401_Not500 | pass |
 
 Повний REG-CSRF-01 автоматизовано: реальний login, cookie сесії й антифорджері-cookie в одному HttpClient (HandleCookies = true), токен отримується тим самим клієнтом з GET /api/auth/csrf-token, стан перевіряється повторним GET.
 
@@ -302,15 +308,53 @@ Properties/launchSettings.json має лише профіль http з applicatio
 Систематичний пошук у Git на commit 9dcb491: git status --short порожній; git ls-files -> 92 відстежувані файли; git grep -n -I -i -E 'password|passwd|secret|api.?key|token|connectionstring' -- . -> 351 збіг; нові відносно етапу 1 збіги (слово token) — назви заголовка X-CSRF-TOKEN, маршрут /api/auth/csrf-token, змінні й коментарі в Antiforgery.cs, csrf.js і тестах; значень токенів немає. Межа: поточні tracked files; history, stash, інші клони й зовнішні CI не перевірялися, крім історії appsettings.Development.json (розділ 9.1).
 
 ## 10. Residual risks
-Неперевірені й тимчасово прийняті ризики, відповідальний і наступна дія.
+
+| Ризик | Чому залишається | Компенсуючий control | Наступна дія |
+|---|---|---|---|
+| Login CSRF і реєстрація від імені браузера | login і register не мають antiforgery, бо до входу токен не видається | наслідок обмежений чужим навчальним акаунтом Reporter; login rate limiter | анонімний bootstrap токена до входу при розвитку проєкту |
+| HTTPS/HSTS не перевірено | локальний стенд лише HTTP | auth cookie поза Development має SecurePolicy.Always | перевірити на production host з TLS |
+| In-memory rate limiter | лічильники не спільні між екземплярами й обнуляються після перезапуску | quota на користувача для пошуку, на IP для входу | спільне сховище лічильників при кількох екземплярах |
+| AllowedHosts "*" | фільтрацію Host вимкнено | застосунок не будує абсолютних URL з Host | задати конкретні хости для deployment |
+| Інші GET-маршрути читабельні для Development origin 4173 | так задумано в ЛР 5 | лише Development; REG-CORS-02 для маршруту токена | перевіряти нові GET-маршрути з чутливими значеннями |
+| Data Protection: watcher реагує лише на відкликання всіх ключів; спільна тека лише локальна | поза межами погодженого варіанта | runbook: перезапуск екземплярів, якщо рядок про відкликання не з'явився | мережеве сховище й окремі ключі при розгортанні |
+| Перевірено лише 6 сценаріїв журналу і консольний sink | межа огляду | structured logging, sensitive data logging вимкнено | повторювати перевірку при нових маршрутах |
 ## 11. Conclusion
-Лише фактичні результати.
+Усі cookie-автентифіковані змінювальні маршрути вимагають antiforgery-токен (REG-CSRF-01, REG-CSRF-02); три власні знахідки виправлено й повторно перевірено; заголовки безпеки однакові для 200, 400, 404, 500 і статики; пошук обмежено per-user. Ключі Data Protection зберігаються в спільній теці поза Git, зашифровані сертифікатом, відкликання доходить до двох екземплярів за 0,4–1,9 с (виміряно вручну) і менш ніж за 10 с (REG-DP-03), збої дають 401/400 або відмову старту, а не 500. Фінальний прогін: 67 з 67.
 ## 12. Evidence appendix
-Для відмінного: доказ відсутності чутливих даних у логах шести сценаріїв етапу 3, п. 4; обґрунтування пріоритетів findings; відтворювані передумови й retest для іншої людини.
-Шляхи, точні команди, ID сценаріїв, безпечний зв’язок відповіді з записом журналу через traceId; без паролів, cookie, токенів і connection strings.
+- Відсутність чутливих даних у журналі для шести сценаріїв: розділ 7.1 (команди Select-String, кількість збігів, позитивний контроль).
+- Обґрунтування пріоритетів findings: розділ 5.
+- Відтворення й retest для іншої людини: docs/findings/F-01-error-path-headers.md, F-02-logout-csrf.md, F-03-csrf-token-cors.md; tests/http/lab-06-unexpected-error.http; runbook docs/runbooks/data-protection-key-leak.md.
+- Кореляція відповіді з журналом: traceId 00-359d3bd2a615df3d100b045a95b2cd0e-faa0755bedae84a0-00 у відповіді 500 і TraceId:359d3bd2a615df3d100b045a95b2cd0e у ExceptionHandlerMiddleware (розділ 4).
+- Автотести ЛР 6: tests/SecureLab.Api.Tests/Lab06RegressionTests.cs (REG-HDR-01, REG-CORS-01, REG-CORS-02, REG-CSRF-01, REG-CSRF-02, REG-RL-01) і Lab06DataProtectionTests.cs (REG-DP-01...05). Команда: dotnet test SecureLab.sln -c Release.
+- У доказах немає паролів, значень cookie, токенів, ключів і connection string, крім відкритого навчального пароля БД local-study-password.
+## 13. Advanced variant: ключі Data Protection для кількох екземплярів
+Реалізація: src/SecureLab.Api/Scaffolding/Lab06DataProtection.cs. За наявності DataProtection:KeysPath: SetApplicationName("SecureLab"), PersistKeysToFileSystem (тека поза Git), ProtectKeysWithCertificate і UnprotectKeysWithAnyCertificate (pfx поза Git, пароль зі змінної середовища; відсутній файл -> відмова старту). Команда runbook --revoke-data-protection-keys викликає IKeyManager.RevokeAllKeys і завершує процес; без KeysPath відмовляє. DataProtectionRevocationWatcher кожні 2 с шукає новий запис runbook (key id="*") і повторює відкликання через локальний IKeyManager, що скидає кеш кільця ключів.
+
+| Перевірка | Результат |
+|---|---|
+| Стан "до": два екземпляри з однієї теки проєкту | спільні ключі в %LOCALAPPDATA%\ASP.NET\DataProtection-Keys, cookie з 5080 приймається на 5081 (як зазначив викладач) |
+| Стан "до": 5081 з опублікованої копії ..\lr06-dp\copy (інший content root) | той самий cookie -> 401, 5080 -> 200 |
+| Після: спільна тека і SetApplicationName | 5081 з іншим content root -> 200; після перезапуску 5081 -> 200 |
+| Без сертифіката | попередження "No XML encryptor configured", у key-*.xml є <masterKey (незашифрований ключ) |
+| Із сертифікатом | <masterKey 0, EncryptedData у файлі; без попередження |
+| Копія теки без сертифіката | 401; у журналі "Unable to retrieve the decryption key" лише з id ключа |
+| Неправильний пароль або відсутній файл сертифіката | процес не стартує (fail closed), пароль у повідомленні відсутній |
+| Відкликання без watcher | через 2,5 хв обидва екземпляри приймають старий cookie (кеш); після перезапуску -> 401 |
+| Відкликання з watcher | застосовано через 1854 мс (5080) і 399 мс (5081); старий cookie -> 401 на обох без перезапуску; старий antiforgery-токен -> 400, кількість інцидентів 10 -> 10; новий вхід -> 201 і 200 на 5081 |
+| Пошкоджений ключ | 401, /health -> ready; у журналі XmlException без вмісту ключа |
+| Журнал | 0 збігів для пароля pfx, <masterKey, <value>, EncryptedData, CipherValue, CfDJ8 |
+| Автотести | REG-DP-01...05, 5 з 5 |
+
+Дефекти, знайдені під час перевірки власного механізму:
+1. Перша версія watcher повторювала відкликання з тією самою датою. ASP.NET Core будує ім'я файлу відкликання з дати, тому другий екземпляр отримував IOException "already exists", BackgroundService падав і зупиняв host. Виправлено: записи синхронізації позначено окремою причиною й ігноруються іншими екземплярами, помилки логуються і не зупиняють host (commit 3abe6d6).
+2. REG-DP-03 виявив, що зсув дати за ProcessId однаковий для двох екземплярів в одному процесі: другий не скидав кеш. Виправлено випадковим зсувом із повтором при збігу імені (commit 93161fc). Після цього REG-DP-03 проходить.
+
+Runbook: docs/runbooks/data-protection-key-leak.md (виявлення, стримування, відновлення, перевірка).
 ## Декларація й журнал ШІ
-Використовував/ла / не використовував/ла. Назва сервісу, для чого, що перевірено й змінено автором, власна інтерпретація.
+Використовувала. Сервіс: Claude (Anthropic). Застосовувався як помічник для пояснення вимог методички, пропозицій коду, текстів тестів і чернеток документації. Усі зміни авторка вносила вручну, запускала збирання, тести й ручні сценарії на власному стенді та перевіряла результати за фактичним виводом.
 
 | Дата | Сервіс | Завдання/фрагмент | Авторська адаптація | Перевірка й результат |
 |---|---|---|---|---|
-| заповнити або не використовував/ла | | | | |
+| 15-16.11.2026 | Claude | модель загроз, таблиці review, картки findings | дані взято з власних команд і скрінів; формулювання узгоджено з фактичним виводом | звірено з git, dotnet test, журналами |
+| 16.11.2026 | Claude | antiforgery-фільтр, csrf.js, адаптація тестів | виправлено помилки компіляції; токен-маршрут виключено з CORS після власної перевірки (F-03) | REG-CSRF-01, REG-CSRF-02, ручна перевірка клієнта |
+| 16.11.2026 | Claude | Lab06DataProtection.cs, watcher, тести REG-DP | два дефекти watcher виявлено власними ручними й автоматичними перевірками і виправлено | Б9-Б11, REG-DP-01...05 |
