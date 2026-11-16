@@ -6,7 +6,8 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using SecureLab.Api.Data;
 using SecureLab.Api.Data.Entities;
-
+using System.Text.Json;
+using SecureLab.Api.Presentation.Endpoints;
 namespace SecureLab.Api.Tests;
 
 /// Поглиблення відмінного рівня: втрата чинності старого сеансу після визначеної серверної події.
@@ -29,8 +30,12 @@ public sealed class SessionRevocationTests(SecureLabApiFactory factory) : IClass
             using var client = CreateClientWithoutCookieJar(factory);
             var copiedCookie = await LoginAndCopyCookieAsync(client, userName, password);
 
+            // ЛР 6: logout перевіряє antiforgery-пару до SignOutAsync, тому спершу отримуємо її
+            // тим самим скопійованим cookie сесії, як це зробив би справжній клієнт.
+            var (antiforgeryCookie, token) = await GetAntiforgeryPairAsync(client, copiedCookie);
             using var logoutRequest = new HttpRequestMessage(HttpMethod.Post, "/api/auth/logout");
-            logoutRequest.Headers.Add("Cookie", copiedCookie);
+            logoutRequest.Headers.Add("Cookie", $"{copiedCookie}; {antiforgeryCookie}");
+            logoutRequest.Headers.Add(AntiforgeryEndpoints.HeaderName, token);
             using var logout = await client.SendAsync(logoutRequest);
             Assert.Equal(HttpStatusCode.NoContent, logout.StatusCode);
 
@@ -116,6 +121,22 @@ public sealed class SessionRevocationTests(SecureLabApiFactory factory) : IClass
             .First(value => value.StartsWith(CookieName + "=", StringComparison.Ordinal));
         // Лише пара «назва=значення» без атрибутів; значення не друкується.
         return header.Split(';')[0];
+    }
+
+    // ЛР 6: отримує antiforgery cookie (лише пара «назва=значення») і request token; значення не друкуються.
+    private static async Task<(string Cookie, string Token)> GetAntiforgeryPairAsync(HttpClient client, string authCookie)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/auth/csrf-token");
+        request.Headers.Add("Cookie", authCookie);
+        using var response = await client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var cookie = response.Headers.GetValues("Set-Cookie")
+            .First(value => value.StartsWith("securelab.antiforgery=", StringComparison.Ordinal))
+            .Split(';')[0];
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var token = json.RootElement.GetProperty("token").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(token));
+        return (cookie, token!);
     }
 
     private static async Task<HttpResponseMessage> GetMeWithCookieAsync(HttpClient client, string cookie)

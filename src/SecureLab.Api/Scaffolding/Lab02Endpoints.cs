@@ -2,7 +2,7 @@ using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
 using SecureLab.Api.Data;
 using SecureLab.Api.Data.Entities;
-
+using SecureLab.Api.Presentation.Endpoints;
 namespace SecureLab.Api.Scaffolding;
 
 // Навчальний старт ЛР 02. Запускати лише з локальними штучними даними.
@@ -189,7 +189,7 @@ public static class Lab02Endpoints
             );
 
             return Results.Created($"/api/incidents/{incident.Id}", response);
-        }).RequireAuthorization();
+        }).RequireAuthorization().AddEndpointFilter<AntiforgeryEndpointFilter>();
     }
     private static string EscapeLike(string value) =>
         value.Replace("\\", "\\\\")

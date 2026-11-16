@@ -38,6 +38,7 @@ public sealed class AuthEventsTests(SecureLabApiFactory factory) : IClassFixture
             new { userName = unknownUserName, password = StudyPassword });
         using var success = await client.PostAsJsonAsync("/api/auth/login",
             new { userName = "alice", password = StudyPassword });
+        await client.UseAntiforgeryTokenAsync();
         using var logout = await client.PostAsync("/api/auth/logout", content: null);
 
         Assert.Equal(HttpStatusCode.Unauthorized, wrong.StatusCode);

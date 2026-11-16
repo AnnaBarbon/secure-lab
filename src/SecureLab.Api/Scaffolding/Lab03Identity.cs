@@ -2,7 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Identity;
 using SecureLab.Api.Data;
 using SecureLab.Api.Data.Entities;
-
+using SecureLab.Api.Presentation.Endpoints;
 namespace SecureLab.Api.Scaffolding;
 
 public static class Lab03Identity
@@ -151,7 +151,7 @@ public static class Lab03Identity
             logger.LogInformation("Auth event {EventType}: result {Result}, user {UserId}, trace {TraceId}",
                 "logout", "succeeded", userId, httpContext.TraceIdentifier);
             return Results.NoContent();
-        });
+        }).AddEndpointFilter<AntiforgeryEndpointFilter>();
         app.MapGet("/api/me", GetCurrentUser).RequireAuthorization();
         // Приклад лише mechanics: не повертає identity і не реалізує оцінювану operation.
         app.MapGet("/api/auth/session-check", () => Results.NoContent()).RequireAuthorization();

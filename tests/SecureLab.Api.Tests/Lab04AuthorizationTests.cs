@@ -305,6 +305,7 @@ public sealed class Lab04AuthorizationTests(SecureLabApiFactory factory) : IClas
         {
             Assert.Equal(HttpStatusCode.NoContent, login.StatusCode);
         }
+        await alice.UseAntiforgeryTokenAsync();
 
         using var response = await alice.PostAsJsonAsync($"/api/incidents/{AliceNewIncidentId}/triage",
             new { note = "Спроба Reporter" });

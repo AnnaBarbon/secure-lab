@@ -27,6 +27,13 @@ builder.Services.AddSingleton<IAuthorizationHandler, IncidentAuthorizationHandle
 
 builder.AddLab03Identity();
 
+// ЛР 6: antiforgery для cookie-автентифікованих змінювальних запитів.
+builder.Services.AddAntiforgery(options =>
+{
+    options.HeaderName = AntiforgeryEndpoints.HeaderName;
+    options.Cookie.Name = "securelab.antiforgery";
+});
+
 // Обмеження частоти лише для повторних спроб входу.
 // Ключ групи — IP-адреса з'єднання, а не введене ім'я користувача: ключ за ім'ям дав би
 // сторонньому змогу навмисно заблокувати чужий вхід; password чи email ключем не є.
@@ -137,6 +144,7 @@ app.MapGet("/health", async (SecureLabDbContext dbContext, CancellationToken can
 
 app.MapIncidentEndpoints();
 app.MapLab03Identity();
+app.MapAntiforgeryToken();
 app.MapLab02Endpoints();
 app.Map("/api/{*path}", () => Results.Problem(
     title: "API route not found",

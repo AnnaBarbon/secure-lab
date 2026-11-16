@@ -36,20 +36,23 @@ public static class IncidentEndpoints
             .WithName("UpdateIncident")
             .Produces<IncidentDetailsResponse>()
             .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status404NotFound);
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .AddEndpointFilter<AntiforgeryEndpointFilter>();
 
         group.MapDelete("/{id:guid}", DeleteAsync)
             .WithName("DeleteIncident")
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status404NotFound);
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .AddEndpointFilter<AntiforgeryEndpointFilter>();
 
         group.MapPost("/{id:guid}/triage", TriageAsync)
             .WithName("TriageIncident")
             .Produces<IncidentStatusChangedResponse>()
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
-            .ProducesProblem(StatusCodes.Status409Conflict);
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .AddEndpointFilter<AntiforgeryEndpointFilter>();
 
         // ЛР 4: child resource; доступ перевіряється через parent incident.
         endpoints.MapGet("/api/incident-comments/{id:guid}", GetCommentAsync)
