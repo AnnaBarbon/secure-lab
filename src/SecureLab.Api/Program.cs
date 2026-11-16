@@ -35,6 +35,9 @@ builder.Services.AddAntiforgery(options =>
     options.Cookie.Name = "securelab.antiforgery";
 });
 
+// ЛР 6, advanced variant: явне керування ключами Data Protection (див. Lab06DataProtection.cs).
+builder.AddLab06DataProtection();
+
 // Обмеження частоти лише для повторних спроб входу.
 // Ключ групи — IP-адреса з'єднання, а не введене ім'я користувача: ключ за ім'ям дав би
 // сторонньому змогу навмисно заблокувати чужий вхід; password чи email ключем не є.
@@ -93,6 +96,11 @@ if (builder.Environment.IsDevelopment())
 }
 
 var app = builder.Build();
+
+if (Lab06DataProtection.TryRunRevokeCommand(app, args))
+{
+    return;
+}
 
 var resetRequested = args.Contains("--reset-database", StringComparer.Ordinal);
 await DatabaseBootstrap.InitializeAsync(app.Services, app.Configuration, app.Environment, resetRequested);
