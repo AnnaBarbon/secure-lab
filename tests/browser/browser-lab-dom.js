@@ -23,7 +23,7 @@ await (async () => {
   const run = Date.now();
 
   for (const [name, description] of cases) {
-    const created = await fetch("/api/incidents", {
+      const created = await window.SecureLabCsrf.mutate("/api/incidents", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: `DOM-test ${name} ${run}`, description, severity: "Low",

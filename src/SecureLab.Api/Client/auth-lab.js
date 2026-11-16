@@ -91,6 +91,8 @@ document.querySelector("#login").addEventListener("submit", async event => {
   form.elements.password.value = "";
   try {
     const response = await postJson("/api/auth/login", payload);
+    // Новий principal: токен попереднього користувача більше не використовується.
+    window.SecureLabCsrf.reset();
     result.textContent = `Login: ${response.status}`;
   } catch {
     result.textContent = "Помилка мережі під час входу.";
@@ -112,7 +114,11 @@ document.querySelector("#incident").addEventListener("submit", async event => {
     occurredAtUtc: occurredAt.toISOString()
   };
   try {
-    const response = await postJson("/api/incidents", payload);
+    const response = await window.SecureLabCsrf.mutate("/api/incidents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
     if (response.status === 201) {
       const created = await response.json();
       incidentResult.textContent = `Create: 201, id ${created.id}, статус ${created.status}`;
@@ -130,7 +136,8 @@ document.querySelector("#incident").addEventListener("submit", async event => {
 
 document.querySelector("#logout").addEventListener("click", async () => {
   try {
-    const response = await apiFetch("/api/auth/logout", { method: "POST" });
+    const response = await window.SecureLabCsrf.mutate("/api/auth/logout", { method: "POST" });
+    window.SecureLabCsrf.reset();
     clearProfile();
     incidentResult.textContent = "";
     const check = await apiFetch("/api/me");
