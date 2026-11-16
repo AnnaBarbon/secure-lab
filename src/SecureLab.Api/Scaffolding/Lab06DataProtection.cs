@@ -83,8 +83,8 @@ public static class Lab06DataProtection
 // Кожні 2 с перевіряє спільну теку. Якщо з'явився новіший запис runbook "відкликати всі ключі"
 // (key id="*"), повторює відкликання через локальний IKeyManager: це скидає кеш кільця ключів
 // у цьому екземплярі. Ім'я файлу відкликання ASP.NET Core будує з його дати, тому локальний запис
-// має дату, зсунуту на кілька тіків (залежно від id процесу), і позначку SyncReason. Записи з
-// SyncReason інші екземпляри ігнорують, тож циклу немає. Помилки логуються й не зупиняють host.
+// має дату, зсунуту на випадкову кількість тіків, і позначку SyncReason. Записи з SyncReason
+// інші екземпляри ігнорують, тож циклу немає. Помилки логуються й не зупиняють host.
 // Вміст ключів не читається й не логуються.
 public sealed class DataProtectionRevocationWatcher(
     string keysPath,
@@ -110,8 +110,7 @@ public sealed class DataProtectionRevocationWatcher(
                 }
 
                 handled = revocationDate;
-                var localDate = revocationDate.AddTicks(1 + Environment.ProcessId % 9973);
-                keyManager.RevokeAllKeys(localDate, SyncReason);
+                RevokeLocally(revocationDate);
                 logger.LogWarning(
                     "Data Protection revocation applied: revocationDate={RevocationDate:O} delayMs={DelayMs:F0}",
                     revocationDate,
@@ -120,6 +119,25 @@ public sealed class DataProtectionRevocationWatcher(
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
                 logger.LogError("Data Protection revocation sync failed: {ErrorType}", exception.GetType().Name);
+            }
+        }
+    }
+
+    // Ім'я файлу відкликання ASP.NET Core будує з дати. Кілька екземплярів (зокрема в одному
+    // процесі) можуть обробляти те саме відкликання одночасно, тому дата локального запису
+    // зсувається на випадкову кількість тіків (менше 1 мс), а при збігу імені — повторюється.
+    private void RevokeLocally(DateTimeOffset revocationDate)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                keyManager.RevokeAllKeys(revocationDate.AddTicks(Random.Shared.Next(1, 10_000)), SyncReason);
+                return;
+            }
+            catch (IOException) when (attempt < 5)
+            {
+                // Ім'я файлу зайняте іншим екземпляром: інша випадкова дата.
             }
         }
     }
